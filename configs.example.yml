@@ -1,3 +1,4 @@
+/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 locale: 'en'
 prefix: '.'
 activity_name: '{count} accounts'
@@ -6,7 +7,8 @@ users_list_pagination_size: 8
 users_list_page_counter_position: 'title'
 enable_prefix_commands_in_guild: true
 
-tweets_check_period: 18
+tweets_check_period: 60
+notification_delay_seconds: 300
 tweets_updater_retry_delay: 5
 tasks_monitor_check_period: 1
 tasks_monitor_log_period: 4
@@ -17,7 +19,7 @@ auto_turn_off_notification: true
 auto_unfollow: true
 
 auto_repair_mismatched_clients: false
-init_latest_tweet_on_startup: false
+init_latest_tweet_on_startup: true
 
 embed:
   type: 'built_in'
