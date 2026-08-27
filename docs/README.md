@@ -1,8 +1,13 @@
+/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 <div align="center">
 
 <a href="./AVATAR.md"><img alt="LOGO" src="/images/md/avatar.png" width="300" height="300" /></a>
   
 # Tweetcord
+
+## Personal fork defaults
+
+This personal fork defaults to a 60-second poll interval and a 300-second delivery delay. The delay lets a later poll replace a queued tweet with its edited representation before it is sent. Original posts, retweets, quote tweets, photos, videos, and GIF previews remain supported; retweet/quote behavior is configured per `/add notifier` entry or with `/customize settings`.
 
 A Discord Bot for Twitter Notifications
 
