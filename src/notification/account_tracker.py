@@ -1,3 +1,4 @@
+/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 import asyncio
 import os
 import sys
@@ -16,6 +17,7 @@ from src.i18n import t
 from src.log import setup_logger
 from src.notification.display_tools import gen_embed, get_action
 from src.notification.get_tweets import get_tweets
+from src.notification.delay_queue import DelayedTweetBuffer
 from src.notification.utils import is_match_media_type, is_match_type, replace_emoji, get_parsed_tweet
 from src.utils import get_accounts, get_lock, get_utcnow
 from src.db_function.readonly_db import connect_readonly
@@ -34,6 +36,7 @@ class AccountTracker():
         self.accounts_data = get_accounts()
         self.db_path = os.path.join(os.getenv('DATA_PATH'), 'tracked_accounts.db')
         self.tweets = {account_name: [] for account_name in self.accounts_data.keys()}
+        self.pending_tweets: dict[tuple[str, str], DelayedTweetBuffer] = {}
         self.session = None
         # Responsible for processing queries and writing timestamps
         self.db_write_queue = asyncio.Queue()
@@ -127,11 +130,21 @@ class AccountTracker():
                 log.warning(f"no timestamp for {username}, task will terminate.")
                 break
 
-            latest_tweets = await get_tweets(self.tweets[client_used], username, last_tweet_at)
+            pending = self.pending_tweets.setdefault(
+                (client_used, username),
+                DelayedTweetBuffer(configs.get('notification_delay_seconds', 300)),
+            )
+            candidates = await get_tweets(self.tweets[client_used], username, last_tweet_at)
+            if candidates:
+                now = datetime.now(timezone.utc)
+                for tweet in candidates:
+                    pending.add(tweet, now)
+
+            latest_tweets = pending.pop_ready()
             if not latest_tweets:
                 continue
             
-            newest_timestamp = latest_tweets[-1].created_on
+            newest_timestamp = max(tweet.created_on for tweet in latest_tweets)
             # Update local cache immediately to prevent re-notification
             self.latest_tweet_timestamps[(username, client_used)] = str(newest_timestamp)
             # Queue the database update
