@@ -1,4 +1,3 @@
-/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 # Personal Tweetcord
 
 A private, self-hosted Discord bot for forwarding posts from selected X/Twitter accounts into selected Discord channels. This is based on [TweetCord](https://github.com/Yuuzi261/Tweetcord) and remains MIT-licensed.
