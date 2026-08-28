@@ -22,7 +22,8 @@ init_latest_tweet_on_startup: true
 
 embed:
   type: 'built_in'
-  trans_default_lang: 'en
+  trans_default_lang: 'en'
+
   built_in:
     fx:
       media:
