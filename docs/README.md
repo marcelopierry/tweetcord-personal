@@ -1,4 +1,3 @@
-/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 18: /bin/ps: Operation not permitted
 <div align="center">
 
 <a href="./AVATAR.md"><img alt="LOGO" src="/images/md/avatar.png" width="300" height="300" /></a>
