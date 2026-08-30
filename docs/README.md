@@ -6,7 +6,7 @@
 
 ## Personal fork defaults
 
-This personal fork defaults to a 60-second poll interval and a 300-second delivery delay. The delay lets a later poll replace a queued tweet with its edited representation before it is sent. Original posts, retweets, quote tweets, photos, videos, and GIF previews remain supported; retweet/quote behavior is configured per `/add notifier` entry or with `/customize settings`.
+This personal fork defaults to a 60-second poll interval and a 180-second delivery delay. The delay lets a later poll replace a queued tweet with its edited representation before it is sent. Original posts, retweets, quote tweets, photos, videos, and GIF previews remain supported; retweet/quote behavior is configured per `/add notifier` entry or with `/customize settings`. Grant the bot **Manage Webhooks** in each destination channel to show every delivered post under the tracked X account's name and avatar.
 
 A Discord Bot for Twitter Notifications
 
@@ -61,9 +61,13 @@ Tweetcord is a Discord bot that leverages the [tweety-ns package](https://github
 | `channel` | str | The channel id which set to delivers notifications |
 | `username` | str | The username of the twitter user you want to turn off notifications for |
 
-👉 `/list users` | `account` `channel`
+👉 `/list accounts`
 
-- List all twitter users whose notifications are enabled on the current server
+- List each unique X account whose notifications are enabled on the current server
+
+👉 `/list settings` | `account` `channel`
+
+- List every enabled X account/channel notifier together with its retweet, quote-tweet, media, role, and X-login settings. `/list users` remains as a backward-compatible alias.
 
 | Parameter | Type | Description |
 | --------- | ---- | ----------- |
@@ -90,19 +94,13 @@ Custom notification messages are in `f-string format`, currently supporting 4 sp
 - `{mention}` : the role to mention when sending to discord
 - `{url}` : the link of the tweet
 
-Using the default notification as an example, if the message is customized to the following format (supporting Discord's markdown format):
+By default, TweetCord sends only the link (and any selected role mention):
 
 ```plaintext
-{mention}**{author}** just {action} here: 
-{url}
+{mention}{url}
 ```
 
-The notification will be sent in this format when a tweet is posted (here is a real-world example):
-
-```plaintext
-@Ping_SubTweet ﾅﾁｮﾈｺ just tweeted here: 
-https://twitter.com/nyachodayo/status/1869000108697960952
-```
+For quote tweets, it sends the original post link first and the quote-post link second. A customized notification message may add text, but TweetCord still appends both links for quote tweets.
 
 👉 `/customize translation` `username` | `language`
 
@@ -236,7 +234,7 @@ Custom activity name is in `f-string` format, currently supporting 1 special var
 
 | Parameter | Description |
 |-----------|-------------|
-| `default_message` | Set default message format globally, the format is the same as the customized message, use f-string and support 4 special variables. For details, please refer to [Commands](#commands). |
+| `default_message` | Template retained for compatibility. This personal fork sends link-only notifications by default; a notifier-specific custom message from `/customize settings` can still use the 4 special variables described in [Commands](#commands). |
 | `emoji_auto_format` | For custom messages, whether to automatically convert short-format emoji codes. If enabled, it allows using codes like `:jerry:` to insert current server's emojis without needing to enter the full name `<:jerry:720576643583836181>`. |
 
 ### 3. Run and invite the bot to your server
