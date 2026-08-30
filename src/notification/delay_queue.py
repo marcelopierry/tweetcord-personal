@@ -48,5 +48,13 @@ class DelayedTweetBuffer:
         ready = [self._items.pop(key).tweet for key in ready_keys]
         return sorted(ready, key=lambda tweet: getattr(tweet, "created_on", now))
 
+    def set_delay_seconds(self, delay_seconds: int) -> None:
+        """Apply a new delay to existing and future items retroactively."""
+        new_delay = timedelta(seconds=max(0, int(delay_seconds)))
+        delta = new_delay - self.delay
+        self.delay = new_delay
+        for item in self._items.values():
+            item.due_at += delta
+
     def __len__(self) -> int:
         return len(self._items)
