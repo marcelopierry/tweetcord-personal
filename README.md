@@ -4,10 +4,11 @@ A private, self-hosted Discord bot for forwarding posts from selected X/Twitter 
 
 ## What is customized
 
-- Five-minute delivery delay by default (`notification_delay_seconds: 300`). A queued post is refreshed if a later poll sees a changed version before delivery.
+- Three-minute delivery delay by default (`notification_delay_seconds: 180`). A queued post is refreshed if a later poll sees a changed version before delivery.
 - Lower polling frequency by default (`tweets_check_period: 60`) to reduce scraping pressure for a personal installation.
 - Per-notifier controls for original posts, retweets, and quote posts remain available through `/add notifier` and `/customize settings`.
-- TweetCord's existing embed pipeline handles photos, multiple photos, video/GIF previews, quote-tweet text, and retweet text. Set `embed.type: built_in` for rich media embeds.
+- Deliveries use a channel webhook when the bot has **Manage Webhooks**, so each post can display the tracked X account's name and avatar without changing the bot's global identity. The bot falls back to its normal identity if that permission is unavailable.
+- With `embed.type: built_in`, photos and videos are downloaded and uploaded as Discord attachments when they fit the channel upload limit. Uploaded videos play in Discord; oversized media falls back to a direct media URL instead of requiring the X post page.
 - Startup defaults to ignoring the backlog from before the bot came online (`init_latest_tweet_on_startup: true`).
 
 The delay reduces duplicate noise from quick changes, but no unauthenticated X scraper can guarantee that a deleted post is never seen or that every edit is observable.
@@ -32,7 +33,7 @@ For a machine that is always on, Docker Compose is also available:
 docker compose up -d
 ```
 
-Then invite the bot with `View Channel`, `Send Messages`, `Embed Links`, `Attach Files`, `Mention Everyone`, and `Use Slash Commands`. Use `/add notifier` to choose the X account, Discord channel, media filter, and whether retweets/quotes are enabled for that notifier.
+Then invite the bot with `View Channel`, `Send Messages`, `Embed Links`, `Attach Files`, `Manage Webhooks`, `Mention Everyone`, and `Use Slash Commands`. Use `/add notifier` to choose the X account, Discord channel, media filter, and whether retweets/quotes are enabled for that notifier.
 
 ## Important operating cost note
 
