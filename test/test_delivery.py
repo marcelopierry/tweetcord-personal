@@ -1,12 +1,13 @@
 import os
 import sys
 import unittest
+from unittest.mock import AsyncMock
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.classes import ParsedTweet
-from src.notification.delivery import _ordered_candidates, build_delivery_links, build_webhook_identity, media_candidates
+from src.notification.delivery import TweetDelivery, _ordered_candidates, build_delivery_links, build_webhook_identity, media_candidates
 
 
 class TestTweetDeliveryHelpers(unittest.TestCase):
@@ -66,6 +67,40 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
         })
         self.assertEqual(parsed.sender_username, 'DiscussingFilm')
         self.assertEqual(parsed.media.items[0]['formats'][0]['url'], 'https://video.twimg.com/video.mp4')
+
+
+class TestTweetDeliverySend(unittest.IsolatedAsyncioTestCase):
+    async def test_none_view_is_omitted_from_regular_message(self):
+        channel = SimpleNamespace(send=AsyncMock())
+        delivery = TweetDelivery(SimpleNamespace())
+        delivery._get_webhook = AsyncMock(return_value=None)
+
+        await delivery.send(
+            channel,
+            content='<https://x.com/example/status/1>',
+            username='Example | Personal TweetCord',
+            avatar_url=None,
+            view=None,
+        )
+
+        kwargs = channel.send.await_args.kwargs
+        self.assertNotIn('view', kwargs)
+
+    async def test_none_view_is_omitted_from_webhook_message(self):
+        webhook = SimpleNamespace(send=AsyncMock())
+        delivery = TweetDelivery(SimpleNamespace())
+        delivery._get_webhook = AsyncMock(return_value=webhook)
+
+        await delivery.send(
+            SimpleNamespace(),
+            content='<https://x.com/example/status/1>',
+            username='Example | Personal TweetCord',
+            avatar_url=None,
+            view=None,
+        )
+
+        kwargs = webhook.send.await_args.kwargs
+        self.assertNotIn('view', kwargs)
 
 
 if __name__ == '__main__':
