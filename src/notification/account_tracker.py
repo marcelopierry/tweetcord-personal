@@ -15,6 +15,7 @@ from configs.load_configs import configs, IS_TRANSLATION_ENABLED
 from src.i18n import t
 from src.log import setup_logger
 from src.notification.display_tools import gen_embed, get_action
+from src.notification.delivery import TweetDelivery, build_delivery_links, build_webhook_identity, prepare_media_delivery
 from src.notification.get_tweets import get_tweets
 from src.notification.delay_queue import DelayedTweetBuffer
 from src.notification.utils import is_match_media_type, is_match_type, replace_emoji, get_parsed_tweet
@@ -37,6 +38,7 @@ class AccountTracker():
         self.tweets = {account_name: [] for account_name in self.accounts_data.keys()}
         self.pending_tweets: dict[tuple[str, str], DelayedTweetBuffer] = {}
         self.session = None
+        self.delivery = TweetDelivery(bot)
         # Responsible for processing queries and writing timestamps
         self.db_write_queue = asyncio.Queue()
         self.latest_tweet_timestamps = {}
@@ -131,7 +133,7 @@ class AccountTracker():
 
             pending = self.pending_tweets.setdefault(
                 (client_used, username),
-                DelayedTweetBuffer(configs.get('notification_delay_seconds', 300)),
+                DelayedTweetBuffer(configs.get('notification_delay_seconds', 180)),
             )
             candidates = await get_tweets(self.tweets[client_used], username, last_tweet_at)
             if candidates:
@@ -181,7 +183,7 @@ class AccountTracker():
             for tweet in latest_tweets:
                 log.info(f'find a new tweet from {username}')
                 
-                content_cache: dict[str, tuple[list[discord.Embed], discord.ui.View, ParsedTweet]] = {}
+                content_cache: dict[str, tuple[ParsedTweet | None, discord.ui.View | None]] = {}
                 
                 def gen_view(label: str, url: str):
                     view = discord.ui.View(timeout=5)
@@ -200,18 +202,17 @@ class AccountTracker():
                     lang = (data['server_translate'] or configs['embed']['trans_default_lang']) if IS_TRANSLATION_ENABLED else None
                     
                     if lang not in content_cache:
-                        p_tweet, embeds = None, None
+                        p_tweet = None
                         
                         if EMBED_TYPE == 'built_in':
                             p_tweet = await get_parsed_tweet(tweet, self.session, lang=lang)
-                            embeds = gen_embed(tweet, p_tweet)
                             if view is None and p_tweet.media.type == 'video' and configs['embed']['built_in']['video_link_button']:
                                 button_url = p_tweet.media.video_link or tweet.url
                                 view = gen_view(t('display.button.view_video'), button_url)
                         
-                        content_cache[lang] = (embeds, view, p_tweet)
+                        content_cache[lang] = (p_tweet, view)
 
-                    current_embeds, current_view, current_p_tweet = content_cache[lang]
+                    current_p_tweet, current_view = content_cache[lang]
 
                     if not is_match_media_type(current_p_tweet if current_p_tweet else tweet, data['enable_media_type']):
                         continue
@@ -226,20 +227,43 @@ class AccountTracker():
                         mention = f"{channel.guild.get_role(int(data['role_id'])).mention} " if data['role_id'] else ''
                         author, action = tweet.author.name, get_action(tweet)
                         
-                        if not data['customized_msg']: msg = configs['default_message']
-                        else: msg = re.sub(r":(\w+):", lambda match: replace_emoji(match, channel.guild), data['customized_msg']) if configs['emoji_auto_format'] else data['customized_msg']
-                        msg = msg.format(mention=mention, author=author, action=action, url=url)
-
-                        if EMBED_TYPE == 'proxy':
-                            await channel.send(msg, view=current_view)
+                        links = build_delivery_links(url, current_p_tweet, tweet.is_quoted)
+                        if data['customized_msg']:
+                            msg = re.sub(r":(\w+):", lambda match: replace_emoji(match, channel.guild), data['customized_msg']) if configs['emoji_auto_format'] else data['customized_msg']
+                            msg = msg.format(mention=mention, author=author, action=action, url=url).rstrip()
+                            # Custom messages remain supported, but quote tweets must
+                            # always include both the original and quote-post links.
+                            if links not in msg:
+                                msg = f'{msg}\n{links}'
                         else:
-                            footer = 'twitter.png' if configs['embed']['built_in']['legacy_logo'] else 'x.png'
-                            file = discord.File(f'images/{footer}', filename='footer.png')
-                            await channel.send(msg, file=file, embeds=current_embeds, view=current_view)
+                            # The personal fork deliberately sends just the requested
+                            # links (plus an optional role mention), not a boilerplate
+                            # "just tweeted here" sentence.
+                            msg = f'{mention}{links}'
+
+                        media = await prepare_media_delivery(
+                            self.session,
+                            current_p_tweet if EMBED_TYPE == 'built_in' else None,
+                            int(channel.guild.filesize_limit),
+                        )
+                        if media.fallback_urls:
+                            msg = f'{msg}\n' + '\n'.join(media.fallback_urls)
+
+                        embeds = gen_embed(tweet, current_p_tweet, include_media=not media.files) if EMBED_TYPE == 'built_in' else None
+                        webhook_name, avatar_url = build_webhook_identity(username, tweet, current_p_tweet)
+                        await self.delivery.send(
+                            channel,
+                            content=msg,
+                            username=webhook_name,
+                            avatar_url=avatar_url,
+                            embeds=embeds,
+                            files=media.files,
+                            view=current_view,
+                            suppress_embeds=not media.fallback_urls,
+                        )
 
                     except Exception as e:
-                        if not isinstance(e, discord.errors.Forbidden):
-                            log.error(f'an error occurred at {channel.mention} while sending notification: {e}')
+                        log.error(f'an error occurred at {channel.mention} while sending notification: {e}')
 
     async def tweetsUpdater(self, app: Twitter):
         updater_name = asyncio.current_task().get_name().split('_', 1)[1]
