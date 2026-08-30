@@ -39,6 +39,13 @@ class TestDelayedTweetBuffer(unittest.TestCase):
         self.buffer.add(FakeTweet('1', self.start, 'same tweet'), self.start)
         self.assertEqual(len(self.buffer), 1)
 
+    def test_delay_change_updates_queued_tweets_retroactively(self):
+        tweet = FakeTweet('1', self.start, 'hello')
+        self.buffer.add(tweet, self.start)
+        self.buffer.set_delay_seconds(180)
+        self.assertEqual(self.buffer.pop_ready(self.start + timedelta(seconds=179)), [])
+        self.assertEqual(self.buffer.pop_ready(self.start + timedelta(seconds=180)), [tweet])
+
 
 if __name__ == '__main__':
     unittest.main()
