@@ -6,7 +6,7 @@
 
 ## Personal fork defaults
 
-This personal fork defaults to a 60-second poll interval and a 180-second delivery delay. The delay lets a later poll replace a queued tweet with its edited representation before it is sent. Original posts, retweets, quote tweets, photos, videos, and GIF previews remain supported; retweet/quote behavior is configured per `/add notifier` entry or with `/customize settings`. Grant the bot **Manage Webhooks** in each destination channel to show every delivered post under the tracked X account's name and avatar.
+This personal fork defaults to a 60-second poll interval and a 180-second delivery delay. The delay lets a later poll replace a queued tweet with its edited representation before it is sent. `/customize delay` persists a new global delay and retroactively reschedules queued posts. Original posts, retweets, quote tweets, photos, videos, and GIF previews remain supported; retweet/quote behavior is configured per `/add notifier` entry or with `/customize settings`. Grant the bot **Manage Webhooks** in each destination channel to show every delivered post under the tracked X account's name and avatar.
 
 A Discord Bot for Twitter Notifications
 
@@ -48,7 +48,7 @@ Tweetcord is a Discord bot that leverages the [tweety-ns package](https://github
 | Parameter | Type | Description |
 | --------- | ---- | ----------- |
 | `username` | str | The username of the twitter user you want to turn on notifications for |
-| `channel` | discord.TextChannel \| discord.Thread | The channel to which the bot delivers notifications |
+| `channel` | discord.TextChannel \| discord.Thread | Optional; defaults to the channel where `/add notifier` is used |
 | `mention` | discord.Role | The role to mention when notifying |
 | `type` | str | Whether to enable notifications for retweets & quotes |
 | `media_type` | str | Whether to enable notifications that include media, or only enable notifications that include media |
@@ -94,13 +94,19 @@ Custom notification messages are in `f-string format`, currently supporting 4 sp
 - `{mention}` : the role to mention when sending to discord
 - `{url}` : the link of the tweet
 
-By default, TweetCord sends only the link (and any selected role mention):
+By default, TweetCord sends the tweet text followed by its link (and any selected role mention). Quote tweets put the quote-post link first and `🔁` before the original link. Retweets put `🔄` before the original link.
 
 ```plaintext
-{mention}{url}
+{optional role mention}
+Tweet text
+<tweet link>
 ```
 
-For quote tweets, it sends the original post link first and the quote-post link second. A customized notification message may add text, but TweetCord still appends both links for quote tweets.
+Retweet deduplication is persistent and channel-specific. If an original tweet or another retweet of it has already been delivered to a channel, later retweets of that original are skipped in that channel. Quote tweets always send because they add new commentary.
+
+➡️ `/customize delay` `minutes`
+
+- Set the persistent global delivery delay from 0 to 60 minutes. The change applies to every tracked account and immediately adjusts tweets already waiting in the queue.
 
 👉 `/customize translation` `username` | `language`
 
@@ -234,7 +240,7 @@ Custom activity name is in `f-string` format, currently supporting 1 special var
 
 | Parameter | Description |
 |-----------|-------------|
-| `default_message` | Template retained for compatibility. This personal fork sends link-only notifications by default; a notifier-specific custom message from `/customize settings` can still use the 4 special variables described in [Commands](#commands). |
+| `default_message` | Template retained for compatibility. This personal fork sends tweet text and its formatted link block by default; a notifier-specific custom message from `/customize settings` can still use the 4 special variables described in [Commands](#commands). |
 | `emoji_auto_format` | For custom messages, whether to automatically convert short-format emoji codes. If enabled, it allows using codes like `:jerry:` to insert current server's emojis without needing to enter the full name `<:jerry:720576643583836181>`. |
 
 ### 3. Run and invite the bot to your server
