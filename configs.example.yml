@@ -7,7 +7,7 @@ users_list_page_counter_position: 'title'
 enable_prefix_commands_in_guild: true
 
 tweets_check_period: 60
-notification_delay_seconds: 300
+notification_delay_seconds: 180
 tweets_updater_retry_delay: 5
 tasks_monitor_check_period: 1
 tasks_monitor_log_period: 4
@@ -44,6 +44,5 @@ embed:
     auto_translation: false
 
 default_message: |
-  {mention}**{author}** just {action} here: 
-  {url}
+  {mention}{url}
 emoji_auto_format: true
