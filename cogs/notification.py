@@ -4,7 +4,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from tweety import Twitter
-from tweety.exceptions import UserProtected
+from tweety.exceptions import RateLimitReached, UserProtected
 
 from configs.load_configs import configs, IS_TRANSLATION_ENABLED
 from core.classes import Cog_Extension
@@ -17,6 +17,7 @@ from src.permission import ADMINISTRATOR
 from src.db_function.readonly_db import connect_readonly
 from src.utils import get_accounts, get_lock, get_utcnow, validate_and_normalize_language
 from src.presence_updater import update_presence
+from src.twitter_profile import resolve_user
 
 log = setup_logger(__name__)
 lock = get_lock()
@@ -76,7 +77,16 @@ class Notification(Cog_Extension):
                     app = Twitter(account_used)
                     await app.connect()
                     try:
-                        new_user = await app.get_user_info(username)
+                        new_user = await resolve_user(app, username)
+                    except RateLimitReached as error:
+                        retry_after = max(60, int(getattr(error, 'retry_after', 0) or 0))
+                        minutes = max(1, (retry_after + 59) // 60)
+                        log.warning(f'X rate limit reached while resolving {username}; retry in about {minutes} minute(s)')
+                        await itn.followup.send(
+                            f'X is temporarily rate limiting this request. Please try again in about {minutes} minute(s).',
+                            ephemeral=True,
+                        )
+                        return
                     except Exception:
                         await itn.followup.send(t('notification.add.user_not_found', username=username), ephemeral=True)
                         return
@@ -93,13 +103,11 @@ class Notification(Cog_Extension):
                                 
                                 try:
                                     await old_app.connect()
-                                    target_user = await old_app.get_user_info(username)
-
                                     if configs['auto_unfollow']:
-                                        status = await old_app.unfollow_user(target_user)
+                                        status = await old_app.unfollow_user(match_user['id'])
                                         log.info(f'successfully unfollowed {new_user.username} (due to client change)') if status else log.warning(f'unable to unfollow {new_user.username}')
                                     else:
-                                        status = await old_app.disable_user_notification(target_user)
+                                        status = await old_app.disable_user_notification(match_user['id'])
                                         log.info(f'successfully turned off notification for {new_user.username} (due to client change)') if status else log.warning(f'unable to turn off notifications for {new_user.username}')
                                 except Exception as e:
                                     log.warning(f'unable to unfollow or disable notification for {new_user.username} (when client changing to {account_used}): {e}')
@@ -108,6 +116,12 @@ class Notification(Cog_Extension):
                         else:
                             await itn.followup.send(t('notification.add.client_conflict', username=new_user.username, account_used=account_used), ephemeral=True)
                             return
+
+                    should_activate = match_user is None or match_user['enabled'] == 0 or is_changed_client
+                    if should_activate:
+                        await app.follow_user(new_user.id)
+                        await app.enable_user_notification(new_user.id)
+                        log.info(f'successfully turned on notification for {new_user.username}')
 
                     server_id = str(channel.guild.id)
                     roleID = str(mention.id) if mention is not None else ''
@@ -136,13 +150,16 @@ class Notification(Cog_Extension):
                                 
                             await db.commit()
 
-                    if match_user is None or match_user['enabled'] == 0 or is_changed_client:
-                        await app.follow_user(new_user)
-                        status = await app.enable_user_notification(new_user)
-                        if status:
-                            log.info(f'successfully turned on notification for {new_user.username}')
-                        else:
-                            log.warning(f'unable to turn on notifications for {new_user.username}')
+                except RateLimitReached as error:
+                    retry_after = max(60, int(getattr(error, 'retry_after', 0) or 0))
+                    minutes = max(1, (retry_after + 59) // 60)
+                    log.warning(f'X rate limit reached while enabling {username}; retry in about {minutes} minute(s)')
+                    await itn.followup.send(
+                        f'X is temporarily rate limiting follow changes. Please try again in about {minutes} minute(s).',
+                        ephemeral=True,
+                    )
+                    await db.rollback()
+                    return
                 except Exception as e:
                     log.error(f'an error occurred while adding notifier: {e}')
                     await itn.followup.send(t('notification.add.failed'), ephemeral=True)
@@ -219,13 +236,11 @@ class Notification(Cog_Extension):
                                 await app.connect()
                                 
                                 try:
-                                    target_user = await app.get_user_info(username)
-
                                     if configs['auto_unfollow']:
-                                        status = await app.unfollow_user(target_user)
+                                        status = await app.unfollow_user(match_notifier['user_id'])
                                         log.info(f'successfully unfollowed {username}') if status else log.warning(f'unable to unfollow {username}')
                                     else:
-                                        status = await app.disable_user_notification(target_user)
+                                        status = await app.disable_user_notification(match_notifier['user_id'])
                                         log.info(f'successfully turned off notification for {username}') if status else log.warning(f'unable to turn off notifications for {username}')
                                 except UserProtected:
                                     log.warning(f'the account: {username} is protected or has been banned, skip this step')
