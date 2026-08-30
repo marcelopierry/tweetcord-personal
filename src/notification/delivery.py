@@ -247,10 +247,11 @@ class TweetDelivery:
                 'content': content,
                 'embeds': embeds or [],
                 'files': files,
-                'view': view,
                 'username': username,
                 'suppress_embeds': suppress_embeds,
             }
+            if view is not None:
+                kwargs['view'] = view
             if avatar_url:
                 kwargs['avatar_url'] = avatar_url
             if isinstance(channel, discord.Thread):
@@ -264,4 +265,11 @@ class TweetDelivery:
 
         for file in files:
             file.reset()
-        await channel.send(content, embeds=embeds or [], files=files, view=view, suppress_embeds=suppress_embeds)
+        kwargs = {
+            'embeds': embeds or [],
+            'files': files,
+            'suppress_embeds': suppress_embeds,
+        }
+        if view is not None:
+            kwargs['view'] = view
+        await channel.send(content, **kwargs)
