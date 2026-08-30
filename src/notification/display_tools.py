@@ -9,7 +9,7 @@ from src.i18n import t
 from src.utils import escape_markdown
 
 
-def gen_embed(tweet: Tweet, parsed_tweet: ParsedTweet) -> list[discord.Embed]:
+def gen_embed(tweet: Tweet, parsed_tweet: ParsedTweet, include_media: bool = True) -> list[discord.Embed]:
     author = tweet.author
     disable_quoted = not FX_SETTINGS['media']['enabled']
     
@@ -26,9 +26,16 @@ def gen_embed(tweet: Tweet, parsed_tweet: ParsedTweet) -> list[discord.Embed]:
     embed = discord.Embed(title=f'{author.name} {get_action(tweet, disable_quoted=disable_quoted)} {get_tweet_type(parsed_tweet)}', 
                           description=description, url=tweet.url, color=0x1da0f2, timestamp=tweet.created_on)
     embed.set_author(name=f'{author.name} (@{author.username})', icon_url=author.profile_image_url_https, url=f'https://twitter.com/{author.username}')
-    embed.set_footer(text='Twitter' if configs['embed']['built_in']['legacy_logo'] else 'X', icon_url='attachment://footer.png')
+    # Keep the footer text without attaching a branding image to every delivery.
+    # Tweet media is sent as its own Discord attachment instead.
+    embed.set_footer(text='Twitter' if configs['embed']['built_in']['legacy_logo'] else 'X')
     if not is_simplified:
         embed.set_thumbnail(url=re.sub(r'normal(?=\.(?:jpg|png)$)', '400x400', tweet.author.profile_image_url_https))
+
+    # When media has been uploaded as Discord attachments, do not duplicate it as
+    # remote embed images. Discord renders the attachments independently instead.
+    if not include_media:
+        return [embed]
     
     if parsed_tweet.media.length == 1:
         embed.set_image(url=parsed_tweet.media.urls[0])
