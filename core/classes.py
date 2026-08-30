@@ -19,13 +19,17 @@ class ParsedTweet():
     DCOS_ICON = '\ud83d\udcd1'
     
     class Media():
-        def __init__(self, type: str = None, urls: list[str] = None, length: int = None, video_link: str = None, mosaic_url: str = None, external_url: str = None):
+        def __init__(self, type: str = None, urls: list[str] = None, length: int = None, video_link: str = None, mosaic_url: str = None, external_url: str = None, items: list[dict] = None):
             self.type = type
             self.urls = urls
             self.length = length
             self.video_link = video_link
             self.mosaic_url = mosaic_url
             self.external_url = external_url
+            # Raw FxEmbed media records are retained for Discord attachment uploads.
+            # They include direct MP4 variants and file sizes that are not needed by
+            # the existing embed renderer.
+            self.items = items or []
             
     class Quote():
         def __init__(self, text: str = None, name: str = None, screen_name: str = None, url: str = None, profile_link: str = None, trans_text: str = None):
@@ -39,18 +43,31 @@ class ParsedTweet():
     def __init__(self, source: Tweet | BeautifulSoup | dict):
         self.media = self.Media()
         self.quote = self.Quote()
+        self.sender_name, self.sender_username, self.sender_avatar_url = None, None, None
         
         self.text, self.trans_text, self.trans_lang = None, None, None
         self.is_mixed = False
         
         if isinstance(source, Tweet):
+            self.sender_name = getattr(source.author, 'name', None)
+            self.sender_username = getattr(source.author, 'username', None)
+            self.sender_avatar_url = getattr(source.author, 'profile_image_url_https', None)
             if hasattr(source, 'media') and len(source.media) > 0:
                 self.media.type = source.media[0].type
                 self.media.urls = [m.media_url_https for m in source.media]
                 self.media.length = len(self.media.urls)
                 self.media.video_link = source.media[0].expanded_url if self.media.type == 'video' else None
+                self.media.items = [
+                    {
+                        'type': getattr(m, 'type', None),
+                        'url': getattr(m, 'media_url_https', None),
+                        'thumbnail_url': getattr(m, 'media_url_https', None),
+                        'formats': getattr(getattr(m, 'video_info', None), 'variants', []),
+                    }
+                    for m in source.media
+                ]
             else:
-                self.media.type, self.media.urls, self.media.length, self.media.video_link = None, [], 0, None
+                self.media.type, self.media.urls, self.media.length, self.media.video_link, self.media.items = None, [], 0, None, []
             self.media.mosaic_url = None
 
         elif isinstance(source, dict):
@@ -69,6 +86,14 @@ class ParsedTweet():
             self.quote.url = quote_data.get('url', None)
             self.quote.profile_link = quote_data.get('author', {}).get('url', None)
             self.quote.trans_text = escape_markdown(quote_data.get('translation', {}).get('text', None))
+
+            # FxEmbed identifies the tracked account as reposted_by for retweets;
+            # otherwise it is the ordinary tweet author. This lets webhook messages
+            # preserve the identity of the account the user chose to track.
+            sender_data = tweet_data.get('reposted_by') or tweet_data.get('author', {})
+            self.sender_name = sender_data.get('name', None)
+            self.sender_username = sender_data.get('screen_name', None)
+            self.sender_avatar_url = sender_data.get('avatar_url', None)
             
             if tweet_data.get('reposted_by', {}):
                 author_name = tweet_data.get('author', {}).get('screen_name', None)
@@ -80,6 +105,7 @@ class ParsedTweet():
                 media_data = tweet_data['quote'].get('media', {})
 
             all_media = media_data.get('all', [])
+            self.media.items = all_media
 
             if not all_media:
                 self.media.type, self.media.urls, self.media.length, self.media.mosaic_url = None, [], 0, None
@@ -112,7 +138,7 @@ class ParsedTweet():
             meta_image = source.find('meta', property='og:image')
             
             if not meta_image:
-                self.media.type, self.media.urls, self.media.length, self.media.mosaic_url = None, [], 0, None
+                self.media.type, self.media.urls, self.media.length, self.media.mosaic_url, self.media.items = None, [], 0, None, []
                 return
 
             img_url = meta_image.get('content', '')
@@ -138,6 +164,7 @@ class ParsedTweet():
                 self.media.urls = [img_url]
                 
             self.media.length = len(self.media.urls)
+            self.media.items = [{'type': self.media.type, 'url': img_url}]
             
             self.media.video_link = f"{source.find('meta', property='og:url').get('content')}/video/1"
 
