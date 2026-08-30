@@ -13,6 +13,7 @@ import discord
 
 from core.classes import ParsedTweet
 from src.log import setup_logger
+from src.utils import escape_markdown, safe_truncate
 
 
 log = setup_logger(__name__)
@@ -20,6 +21,8 @@ log = setup_logger(__name__)
 WEBHOOK_NAME = 'Personal TweetCord delivery'
 WEBHOOK_SUFFIX = 'Personal TweetCord'
 MAX_ATTACHMENTS = 10
+QUOTE_ORIGINAL_EMOJI = '🔁'
+RETWEET_EMOJI = '🔄'
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,14 @@ class MediaDelivery:
     fallback_urls: list[str]
 
 
+@dataclass(frozen=True)
+class DeliveryReferences:
+    claim_id: str
+    tweet_id: str
+    original_id: str | None
+    original_url: str | None
+
+
 def _get(source: Any, key: str, default: Any = None) -> Any:
     if isinstance(source, Mapping):
         return source.get(key, default)
@@ -50,17 +61,53 @@ def _as_positive_int(value: Any) -> int | None:
     return number if number > 0 else None
 
 
-def build_delivery_links(tweet_url: str, parsed_tweet: ParsedTweet | None, is_quote: bool) -> str:
-    """Return embed-suppressed post links, putting a quoted original first."""
-    urls = []
-    quote_url = parsed_tweet.quote.url if parsed_tweet and parsed_tweet.quote else None
+def build_delivery_links(
+    tweet_url: str,
+    parsed_tweet: ParsedTweet | None,
+    is_quote: bool,
+    is_retweet: bool = False,
+    original_url: str | None = None,
+) -> str:
+    """Build clean Discord links for ordinary, quote, and retweeted posts."""
+    quote_url = original_url or (parsed_tweet.quote.url if parsed_tweet and parsed_tweet.quote else None)
     if is_quote and quote_url:
-        urls.append(quote_url)
-    if tweet_url:
-        urls.append(tweet_url)
+        # The tracked account's quote post is the new content, so it comes first.
+        return f'<{tweet_url}>\n{QUOTE_ORIGINAL_EMOJI} <{quote_url}>'
+    if is_retweet:
+        return f'{RETWEET_EMOJI} <{original_url or tweet_url}>'
+    return f'<{tweet_url}>' if tweet_url else ''
 
-    # Preserve order while avoiding duplicate links when the source is malformed.
-    return '\n'.join(f'<{url}>' for url in dict.fromkeys(urls))
+
+def build_delivery_text(tweet: Any, parsed_tweet: ParsedTweet | None) -> str:
+    """Return the tweet body as message text, capped by ParsedTweet's safe limit."""
+    if parsed_tweet:
+        parsed_text = parsed_tweet.get_text(simplified_content=True)
+        if isinstance(parsed_text, tuple):
+            parsed_text = parsed_text[0]
+        if parsed_text:
+            return str(parsed_text).strip()
+
+    fallback = escape_markdown(str(getattr(tweet, 'text', '') or '')).strip()
+    return safe_truncate(fallback, 1200)[0] if fallback else ''
+
+
+def get_delivery_references(tweet: Any, parsed_tweet: ParsedTweet | None) -> DeliveryReferences:
+    """Identify what a channel is seeing for persistent deduplication."""
+    tweet_id = str(getattr(tweet, 'id', None) or getattr(tweet, 'url', ''))
+    source = getattr(tweet, 'retweeted_tweet', None) if getattr(tweet, 'is_retweet', False) else getattr(tweet, 'quoted_tweet', None)
+    original_url = getattr(source, 'url', None)
+    if getattr(tweet, 'is_quoted', False) and not original_url and parsed_tweet:
+        original_url = parsed_tweet.quote.url
+    original_id = getattr(source, 'id', None)
+    if original_id is None and original_url:
+        match = re.search(r'/status/(\d+)', original_url)
+        original_id = match.group(1) if match else None
+    original_id = str(original_id) if original_id is not None else None
+
+    # Quotes claim their own post and therefore always deliver even when their
+    # referenced original has already been seen. Retweets claim the original.
+    claim_id = original_id if getattr(tweet, 'is_retweet', False) and original_id else tweet_id
+    return DeliveryReferences(claim_id, tweet_id, original_id, original_url)
 
 
 def _large_avatar(url: str | None) -> str | None:
