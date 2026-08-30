@@ -46,7 +46,7 @@ class Notification(Cog_Extension):
         media_type=t('commands.add.notifier.params.media_type'),
         account_used=t('commands.add.notifier.params.account_used'),
     )
-    async def notifier(self, itn: discord.Interaction, username: str, channel: discord.TextChannel | discord.Thread, mention: discord.Role = None, enable_type: str = '11', media_type: str = '11', account_used: str = list(get_accounts().keys())[0]):
+    async def notifier(self, itn: discord.Interaction, username: str, channel: discord.TextChannel | discord.Thread = None, mention: discord.Role = None, enable_type: str = '11', media_type: str = '11', account_used: str = list(get_accounts().keys())[0]):
         """Add a twitter user to specific channel on your server.
 
         Parameters
@@ -54,7 +54,8 @@ class Notification(Cog_Extension):
         username: str
             The username of the twitter user you want to turn on notifications for.
         channel: discord.TextChannel | discord.Thread
-            The channel to which the bot delivers notifications.
+            The channel to which the bot delivers notifications. Defaults to
+            the channel where this command is used.
         mention: discord.Role
             The role to mention when notifying.
         enable_type: str
@@ -66,6 +67,11 @@ class Notification(Cog_Extension):
         """
 
         await itn.response.defer(ephemeral=True)
+
+        channel = channel or itn.channel
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            await itn.followup.send('Please use this command in a server text channel or choose a channel explicitly.', ephemeral=True)
+            return
 
         async with aiosqlite.connect(os.path.join(os.getenv('DATA_PATH'), 'tracked_accounts.db')) as db:
             await db.execute('PRAGMA synchronous = OFF')
@@ -332,6 +338,18 @@ class Notification(Cog_Extension):
                         await itn.followup.send(t('notification.customize.translation.success_set', username=username, lang_code=lang_code), ephemeral=True)
                 else:
                     await itn.followup.send(t('notification.customize.translation.user_not_found', username=username), ephemeral=True)
+
+    @customize_group.command(name='delay', description='Set the global delay before new tweets are delivered.')
+    @app_commands.describe(minutes='Delay in minutes for every tracked account (0 to 60).')
+    async def customize_delay(self, itn: discord.Interaction, minutes: app_commands.Range[int, 0, 60]):
+        """Change the persistent global delay and update queued tweets immediately."""
+        await itn.response.defer(ephemeral=True)
+        seconds = int(minutes) * 60
+        queued = await self.account_tracker.set_notification_delay(seconds)
+        await itn.followup.send(
+            f'Global tweet delay set to **{minutes} minute(s)**. Updated **{queued}** currently queued tweet(s).',
+            ephemeral=True,
+        )
 
     @r_notifier.autocomplete('channel_id')
     async def get_channels_for_r_notifier(self, itn: discord.Interaction, input_channel: str) -> list[app_commands.Choice[str]]:        
