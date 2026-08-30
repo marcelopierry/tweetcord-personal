@@ -7,14 +7,47 @@ from types import SimpleNamespace
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.classes import ParsedTweet
-from src.notification.delivery import TweetDelivery, _ordered_candidates, build_delivery_links, build_webhook_identity, media_candidates
+from src.notification.delivery import TweetDelivery, _ordered_candidates, build_delivery_links, build_delivery_text, build_webhook_identity, get_delivery_references, media_candidates
 
 
 class TestTweetDeliveryHelpers(unittest.TestCase):
-    def test_quote_delivers_original_then_quote_link(self):
+    def test_quote_delivers_quote_then_original_link(self):
         parsed = SimpleNamespace(quote=SimpleNamespace(url='https://x.com/original/status/1'))
         links = build_delivery_links('https://x.com/tracked/status/2', parsed, is_quote=True)
-        self.assertEqual(links, '<https://x.com/original/status/1>\n<https://x.com/tracked/status/2>')
+        self.assertEqual(links, '<https://x.com/tracked/status/2>\n🔁 <https://x.com/original/status/1>')
+
+    def test_retweet_links_to_original_with_retweet_emoji(self):
+        links = build_delivery_links(
+            'https://x.com/tracked/status/2',
+            None,
+            is_quote=False,
+            is_retweet=True,
+            original_url='https://x.com/original/status/1',
+        )
+        self.assertEqual(links, '🔄 <https://x.com/original/status/1>')
+
+    def test_delivery_text_uses_parsed_tweet_body(self):
+        parsed = SimpleNamespace(get_text=lambda simplified_content: ('The tweet body', False))
+        tweet = SimpleNamespace(text='fallback')
+        self.assertEqual(build_delivery_text(tweet, parsed), 'The tweet body')
+
+    def test_delivery_text_caps_long_fallback(self):
+        tweet = SimpleNamespace(text='x' * 1600)
+        self.assertLessEqual(len(build_delivery_text(tweet, None)), 1200)
+
+    def test_retweet_claims_original_id_for_deduplication(self):
+        original = SimpleNamespace(id='100', url='https://x.com/original/status/100')
+        tweet = SimpleNamespace(id='200', url='https://x.com/tracked/status/200', is_retweet=True, is_quoted=False, retweeted_tweet=original)
+        references = get_delivery_references(tweet, None)
+        self.assertEqual(references.claim_id, '100')
+        self.assertEqual(references.tweet_id, '200')
+
+    def test_quote_claims_its_own_id_even_when_original_was_seen(self):
+        original = SimpleNamespace(id='100', url='https://x.com/original/status/100')
+        tweet = SimpleNamespace(id='200', url='https://x.com/tracked/status/200', is_retweet=False, is_quoted=True, quoted_tweet=original)
+        references = get_delivery_references(tweet, None)
+        self.assertEqual(references.claim_id, '200')
+        self.assertEqual(references.original_id, '100')
 
     def test_webhook_identity_uses_retweeter_identity(self):
         parsed = SimpleNamespace(
