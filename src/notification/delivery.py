@@ -23,6 +23,10 @@ WEBHOOK_SUFFIX = 'Personal TweetCord'
 MAX_ATTACHMENTS = 10
 QUOTE_ORIGINAL_EMOJI = '🔁'
 RETWEET_EMOJI = '🔄'
+YOUTUBE_URL_RE = re.compile(
+    r'https?://(?:(?:www|m)\.)?(?:youtube\.com|youtu\.be)/[^\s<>\]\)]+',
+    flags=re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -89,6 +93,12 @@ def build_delivery_text(tweet: Any, parsed_tweet: ParsedTweet | None) -> str:
 
     fallback = escape_markdown(str(getattr(tweet, 'text', '') or '')).strip()
     return safe_truncate(fallback, 1200)[0] if fallback else ''
+
+
+def extract_youtube_urls(text: str) -> list[str]:
+    """Return unique expanded YouTube links suitable for Discord previews."""
+    urls = [match.group(0).rstrip('.,!?;:') for match in YOUTUBE_URL_RE.finditer(text or '')]
+    return list(dict.fromkeys(urls))
 
 
 def get_delivery_references(tweet: Any, parsed_tweet: ParsedTweet | None) -> DeliveryReferences:
