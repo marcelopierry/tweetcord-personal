@@ -179,6 +179,45 @@ def build_tweet_embed(
     return embed
 
 
+def build_quote_original_embed(tweet: Any, parsed_tweet: ParsedTweet | None) -> discord.Embed | None:
+    """Render a quote tweet's referenced original as a second Discord card."""
+    if not getattr(tweet, 'is_quoted', False):
+        return None
+
+    source = getattr(tweet, 'quoted_tweet', None)
+    quote = getattr(parsed_tweet, 'quote', None)
+    quote_text = getattr(quote, 'trans_text', None) or getattr(quote, 'text', None)
+    if not quote_text and source:
+        quote_text = escape_markdown(str(getattr(source, 'text', '') or ''))
+    if not quote_text:
+        return None
+    quote_text = safe_truncate(str(quote_text).strip(), 650)[0]
+
+    source_author = getattr(source, 'author', None)
+    name = getattr(quote, 'name', None) or getattr(source_author, 'name', None) or 'Original tweet'
+    username = getattr(quote, 'screen_name', None) or getattr(source_author, 'username', None)
+    avatar_url = _large_avatar(
+        getattr(quote, 'avatar_url', None)
+        or getattr(source_author, 'profile_image_url_https', None)
+    )
+    source_url = getattr(quote, 'url', None) or getattr(source, 'url', None)
+
+    embed = discord.Embed(
+        description=quote_text,
+        color=0xAAB8C2,
+        timestamp=getattr(source, 'created_on', None),
+    )
+    author_name = f'{name} (@{username})' if username else name
+    author_args: dict[str, Any] = {'name': author_name}
+    if source_url:
+        author_args['url'] = source_url
+    if avatar_url:
+        author_args['icon_url'] = avatar_url
+    embed.set_author(**author_args)
+    embed.set_footer(text=WEBHOOK_SUFFIX)
+    return embed
+
+
 def _extension(url: str, fallback: str) -> str:
     parsed = urlparse(url)
     path_match = re.search(r'\.([a-z0-9]{2,5})$', parsed.path, flags=re.IGNORECASE)
