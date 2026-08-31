@@ -7,7 +7,7 @@ from types import SimpleNamespace
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.classes import ParsedTweet
-from src.notification.delivery import TweetDelivery, _ordered_candidates, build_delivery_links, build_delivery_text, build_tweet_embed, build_webhook_identity, extract_youtube_urls, get_delivery_references, media_candidates
+from src.notification.delivery import TweetDelivery, _ordered_candidates, build_delivery_links, build_delivery_text, build_quote_original_embed, build_tweet_embed, build_webhook_identity, extract_youtube_urls, get_delivery_references, media_candidates
 
 
 class TestTweetDeliveryHelpers(unittest.TestCase):
@@ -66,6 +66,36 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
         references = get_delivery_references(tweet, None)
         self.assertEqual(references.claim_id, '200')
         self.assertEqual(references.original_id, '100')
+
+    def test_quote_original_is_rendered_as_a_second_card(self):
+        source = SimpleNamespace(
+            text='Fallback original text',
+            url='https://x.com/original/status/100',
+            created_on=None,
+            author=SimpleNamespace(
+                name='Original Author',
+                username='original',
+                profile_image_url_https='https://pbs.twimg.com/profile_images/original_normal.jpg',
+            ),
+        )
+        tweet = SimpleNamespace(is_quoted=True, quoted_tweet=source)
+        parsed = SimpleNamespace(quote=SimpleNamespace(
+            text='Original tweet text',
+            trans_text=None,
+            name='Original Author',
+            screen_name='original',
+            url=source.url,
+            avatar_url='https://pbs.twimg.com/profile_images/original_normal.jpg',
+        ))
+        embed = build_quote_original_embed(tweet, parsed)
+        self.assertEqual(embed.description, 'Original tweet text')
+        self.assertEqual(embed.author.name, 'Original Author (@original)')
+        self.assertEqual(embed.author.url, source.url)
+        self.assertEqual(embed.author.icon_url, 'https://pbs.twimg.com/profile_images/original_400x400.jpg')
+        self.assertEqual(embed.color.value, 0xAAB8C2)
+
+    def test_non_quote_has_no_original_card(self):
+        self.assertIsNone(build_quote_original_embed(SimpleNamespace(is_quoted=False), None))
 
     def test_webhook_identity_uses_retweeter_identity(self):
         parsed = SimpleNamespace(
