@@ -141,6 +141,34 @@ def build_webhook_identity(tracked_username: str, tweet: Any, parsed_tweet: Pars
     return f'{name}{suffix}'[:80], _large_avatar(avatar)
 
 
+def build_tweet_embed(
+    tracked_username: str,
+    tweet: Any,
+    parsed_tweet: ParsedTweet | None,
+    tweet_text: str,
+) -> discord.Embed | None:
+    """Render the tweet body in a compact Discord card without duplicating media."""
+    if not tweet_text:
+        return None
+
+    webhook_name, avatar_url = build_webhook_identity(tracked_username, tweet, parsed_tweet)
+    display_name = webhook_name.removesuffix(f' | {WEBHOOK_SUFFIX}')
+    embed = discord.Embed(
+        description=tweet_text,
+        color=0x1DA1F2,
+        timestamp=getattr(tweet, 'created_on', None),
+    )
+    author_args: dict[str, Any] = {
+        'name': f'{display_name} (@{tracked_username})',
+        'url': f'https://x.com/{tracked_username}',
+    }
+    if avatar_url:
+        author_args['icon_url'] = avatar_url
+    embed.set_author(**author_args)
+    embed.set_footer(text=WEBHOOK_SUFFIX)
+    return embed
+
+
 def _extension(url: str, fallback: str) -> str:
     parsed = urlparse(url)
     path_match = re.search(r'\.([a-z0-9]{2,5})$', parsed.path, flags=re.IGNORECASE)
