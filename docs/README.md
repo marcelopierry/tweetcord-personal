@@ -6,7 +6,7 @@
 
 ## Personal fork defaults
 
-This personal fork defaults to a 60-second poll interval and a 180-second delivery delay. The delay lets a later poll replace a queued tweet with its edited representation before it is sent. `/customize delay` persists a new global delay and retroactively reschedules queued posts. Original posts, retweets, quote tweets, photos, videos, and GIF previews remain supported; retweet/quote behavior is configured per `/add notifier` entry or with `/customize settings`. Grant the bot **Manage Webhooks** in each destination channel to show every delivered post under the tracked X account's name and avatar.
+This personal fork defaults to a 60-second poll interval and a 180-second post-detection send delay. The delay lets a later poll replace a queued tweet with its edited representation before it is sent. `/customize send-delay` persists a new global delay and retroactively reschedules queued posts; `/customize delay` is retained as a compatibility alias. Original posts, retweets, quote tweets, photos, videos, and GIF previews remain supported; retweet/quote behavior is configured per `/add notifier` entry or with `/customize settings`. Grant the bot **Manage Webhooks** in each destination channel to show every delivered post under the tracked X account's name and avatar.
 
 A Discord Bot for Twitter Notifications
 
@@ -94,19 +94,19 @@ Custom notification messages are in `f-string format`, currently supporting 4 sp
 - `{mention}` : the role to mention when sending to discord
 - `{url}` : the link of the tweet
 
-By default, TweetCord sends the tweet text followed by its link (and any selected role mention). Quote tweets put the quote-post link first and `🔁` before the original link. Retweets put `🔄` before the original link.
+By default, TweetCord places the tweet text in a compact Discord embed card. The link block appears separately above the card, and uploaded media appears separately below it. Quote tweets put the quote-post link first and `🔁` before the original link. Retweets put `🔄` before the original link.
 
 ```plaintext
 {optional role mention}
-Tweet text
 <tweet link>
+[Discord embed card containing the tweet text]
 ```
 
 Retweet deduplication is persistent and channel-specific. If an original tweet or another retweet of it has already been delivered to a channel, later retweets of that original are skipped in that channel. Quote tweets always send because they add new commentary.
 
-➡️ `/customize delay` `minutes`
+➡️ `/customize send-delay` `minutes`
 
-- Set the persistent global delivery delay from 0 to 60 minutes. The change applies to every tracked account and immediately adjusts tweets already waiting in the queue.
+- Set the persistent delay from the time a tweet is found until it is sent, from 0 to 60 minutes. The change applies to every tracked account and immediately adjusts tweets already waiting in the queue. `/customize delay` performs the same action as a compatibility alias.
 
 👉 `/customize translation` `username` | `language`
 
@@ -240,7 +240,7 @@ Custom activity name is in `f-string` format, currently supporting 1 special var
 
 | Parameter | Description |
 |-----------|-------------|
-| `default_message` | Template retained for compatibility. This personal fork sends tweet text and its formatted link block by default; a notifier-specific custom message from `/customize settings` can still use the 4 special variables described in [Commands](#commands). |
+| `default_message` | Template retained for compatibility. This personal fork sends a formatted link block plus a separate tweet-text embed card by default; a notifier-specific custom message from `/customize settings` can still use the 4 special variables described in [Commands](#commands). |
 | `emoji_auto_format` | For custom messages, whether to automatically convert short-format emoji codes. If enabled, it allows using codes like `:jerry:` to insert current server's emojis without needing to enter the full name `<:jerry:720576643583836181>`. |
 
 ### 3. Run and invite the bot to your server
