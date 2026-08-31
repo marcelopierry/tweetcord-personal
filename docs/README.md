@@ -94,7 +94,7 @@ Custom notification messages are in `f-string format`, currently supporting 4 sp
 - `{mention}` : the role to mention when sending to discord
 - `{url}` : the link of the tweet
 
-By default, TweetCord places the tweet text in a compact Discord embed card. The link block appears separately above the card, and uploaded media appears separately below it. Quote tweets put the quote-post link first and `🔁` before the original link. Retweets put `🔄` before the original link.
+By default, TweetCord places the tweet text in a compact Discord embed card. The link block appears separately above the card, and uploaded media is sent in a follow-up below it. Quote tweets are ordered as the quote-post link, `🔁` plus the original link, the quote author's card, the original author's card, and finally any photos/videos. Retweets put `🔄` before the original link.
 
 ```plaintext
 {optional role mention}
