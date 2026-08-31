@@ -32,12 +32,13 @@ class ParsedTweet():
             self.items = items or []
             
     class Quote():
-        def __init__(self, text: str = None, name: str = None, screen_name: str = None, url: str = None, profile_link: str = None, trans_text: str = None):
+        def __init__(self, text: str = None, name: str = None, screen_name: str = None, url: str = None, profile_link: str = None, avatar_url: str = None, trans_text: str = None):
             self.text = text
             self.name = name
             self.screen_name = screen_name
             self.url = url
             self.profile_link = profile_link
+            self.avatar_url = avatar_url
             self.trans_text = trans_text
     
     def __init__(self, source: Tweet | BeautifulSoup | dict):
@@ -85,6 +86,7 @@ class ParsedTweet():
             self.quote.screen_name = quote_data.get('author', {}).get('screen_name', None)
             self.quote.url = quote_data.get('url', None)
             self.quote.profile_link = quote_data.get('author', {}).get('url', None)
+            self.quote.avatar_url = quote_data.get('author', {}).get('avatar_url', None)
             self.quote.trans_text = escape_markdown(quote_data.get('translation', {}).get('text', None))
 
             # FxEmbed identifies the tracked account as reposted_by for retweets;
