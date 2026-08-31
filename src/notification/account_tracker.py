@@ -15,7 +15,7 @@ from configs.load_configs import configs, IS_TRANSLATION_ENABLED
 from src.i18n import t
 from src.log import setup_logger
 from src.notification.display_tools import get_action
-from src.notification.delivery import TweetDelivery, build_delivery_links, build_delivery_text, build_quote_original_embed, build_tweet_embed, build_webhook_identity, extract_youtube_urls, get_delivery_references, prepare_media_delivery
+from src.notification.delivery import TweetDelivery, build_delivery_links, build_delivery_text, build_quote_original_embed, build_tweet_embed, build_webhook_identity, extract_external_urls, get_delivery_references, prepare_media_delivery
 from src.notification.delivery_history import DeliveryHistory
 from src.notification.get_tweets import get_tweets
 from src.notification.delay_queue import DelayedTweetBuffer
@@ -286,7 +286,14 @@ class AccountTracker():
                         tweet_embed = build_tweet_embed(username, tweet, current_p_tweet, tweet_text)
                         original_embed = build_quote_original_embed(tweet, current_p_tweet)
                         tweet_embeds = [embed for embed in (tweet_embed, original_embed) if embed]
-                        youtube_urls = extract_youtube_urls(tweet_text)
+                        preview_text = '\n'.join(
+                            part for part in (
+                                tweet_text,
+                                original_embed.description if original_embed else None,
+                            )
+                            if part
+                        )
+                        external_urls = extract_external_urls(preview_text)
                         message_parts = []
                         if data['customized_msg']:
                             custom = re.sub(r":(\w+):", lambda match: replace_emoji(match, channel.guild), data['customized_msg']) if configs['emoji_auto_format'] else data['customized_msg']
@@ -343,15 +350,14 @@ class AccountTracker():
                             # tweet would duplicate them. Keep media best-effort.
                             log.warning(f'failed to send media follow-up for {tweet.url}: {e}')
 
-                    # YouTube needs an ordinary, unsuppressed message link for
-                    # Discord to generate its native playable preview. Sending it
-                    # after the tweet keeps the preview below the text card and
-                    # uploaded media, like the separate photo/video presentation.
-                    for youtube_url in youtube_urls:
+                    # External links need ordinary, unsuppressed messages for
+                    # Discord to generate native article, website, and video
+                    # previews. Keep each preview below the card and media.
+                    for external_url in external_urls:
                         try:
                             await self.delivery.send(
                                 channel,
-                                content=f'↧\n{youtube_url}',
+                                content=f'↧\n{external_url}',
                                 username=webhook_name,
                                 avatar_url=avatar_url,
                                 suppress_embeds=False,
@@ -359,7 +365,7 @@ class AccountTracker():
                         except Exception as e:
                             # The primary tweet already succeeded, so a failed
                             # optional preview must not release its dedupe claim.
-                            log.warning(f'failed to send YouTube preview for {youtube_url}: {e}')
+                            log.warning(f'failed to send external-link preview for {external_url}: {e}')
 
                     # The reservation already records claim_id. Also retain the
                     # wrapper/quote ID and referenced original for future checks.
