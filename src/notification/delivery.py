@@ -23,10 +23,12 @@ WEBHOOK_SUFFIX = 'Personal TweetCord'
 MAX_ATTACHMENTS = 10
 QUOTE_ORIGINAL_EMOJI = '🔁'
 RETWEET_EMOJI = '🔄'
-YOUTUBE_URL_RE = re.compile(
-    r'https?://(?:(?:www|m)\.)?(?:youtube\.com|youtu\.be)/[^\s<>\]\)]+',
+MARKDOWN_URL_RE = re.compile(
+    r'\]\((https?://(?:[^\s()]|\([^\s()]*\))+?)\)',
     flags=re.IGNORECASE,
 )
+BARE_URL_RE = re.compile(r'https?://[^\s<>\]]+', flags=re.IGNORECASE)
+X_HOSTS = {'x.com', 'twitter.com'}
 
 
 @dataclass(frozen=True)
@@ -95,10 +97,51 @@ def build_delivery_text(tweet: Any, parsed_tweet: ParsedTweet | None) -> str:
     return safe_truncate(fallback, 1200)[0] if fallback else ''
 
 
+def _clean_preview_url(url: str, *, from_markdown: bool = False) -> str:
+    url = url.rstrip('.,!?;:\'"’')
+    return url if from_markdown else url.rstrip(')]}')
+
+
+def _is_x_url(url: str) -> bool:
+    host = (urlparse(url).hostname or '').lower().removeprefix('www.')
+    return any(host == x_host or host.endswith(f'.{x_host}') for x_host in X_HOSTS)
+
+
+def extract_external_urls(text: str) -> list[str]:
+    """Return unique non-X links from plain text and Discord Markdown links."""
+    markdown_matches = list(MARKDOWN_URL_RE.finditer(text or ''))
+    markdown_spans = [(match.start(1), match.end(1)) for match in markdown_matches]
+    candidates = [
+        (match.start(1), match.group(1), True)
+        for match in markdown_matches
+    ]
+    candidates.extend(
+        (match.start(), match.group(0), False)
+        for match in BARE_URL_RE.finditer(text or '')
+        if not any(start <= match.start() < end for start, end in markdown_spans)
+    )
+
+    urls: list[str] = []
+    seen: set[str] = set()
+    for _, candidate, from_markdown in sorted(candidates, key=lambda item: item[0]):
+        url = _clean_preview_url(candidate, from_markdown=from_markdown)
+        if not url or _is_x_url(url) or url in seen:
+            continue
+        seen.add(url)
+        urls.append(url)
+    return urls
+
+
 def extract_youtube_urls(text: str) -> list[str]:
-    """Return unique expanded YouTube links suitable for Discord previews."""
-    urls = [match.group(0).rstrip('.,!?;:') for match in YOUTUBE_URL_RE.finditer(text or '')]
-    return list(dict.fromkeys(urls))
+    """Backward-compatible helper retained for callers that only want YouTube."""
+    youtube_hosts = {'youtube.com', 'youtu.be'}
+    return [
+        url for url in extract_external_urls(text)
+        if any(
+            (urlparse(url).hostname or '').lower().removeprefix('www.').removeprefix('m.') == host
+            for host in youtube_hosts
+        )
+    ]
 
 
 def get_delivery_references(tweet: Any, parsed_tweet: ParsedTweet | None) -> DeliveryReferences:
