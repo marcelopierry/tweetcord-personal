@@ -7,7 +7,7 @@ from types import SimpleNamespace
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.classes import ParsedTweet
-from src.notification.delivery import TweetDelivery, _ordered_candidates, build_delivery_links, build_delivery_text, build_tweet_embed, build_webhook_identity, get_delivery_references, media_candidates
+from src.notification.delivery import TweetDelivery, _ordered_candidates, build_delivery_links, build_delivery_text, build_tweet_embed, build_webhook_identity, extract_youtube_urls, get_delivery_references, media_candidates
 
 
 class TestTweetDeliveryHelpers(unittest.TestCase):
@@ -34,6 +34,24 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
     def test_delivery_text_caps_long_fallback(self):
         tweet = SimpleNamespace(text='x' * 1600)
         self.assertLessEqual(len(build_delivery_text(tweet, None)), 1200)
+
+    def test_youtube_links_are_extracted_once_for_separate_previews(self):
+        text = (
+            'Watch https://youtu.be/abc123. Then '
+            'https://www.youtube.com/watch?v=xyz789&feature=share and '
+            'again https://youtu.be/abc123'
+        )
+        self.assertEqual(extract_youtube_urls(text), [
+            'https://youtu.be/abc123',
+            'https://www.youtube.com/watch?v=xyz789&feature=share',
+        ])
+
+    def test_youtube_shorts_and_mobile_links_are_supported(self):
+        text = 'https://youtube.com/shorts/abc123 https://m.youtube.com/watch?v=xyz789'
+        self.assertEqual(extract_youtube_urls(text), [
+            'https://youtube.com/shorts/abc123',
+            'https://m.youtube.com/watch?v=xyz789',
+        ])
 
     def test_retweet_claims_original_id_for_deduplication(self):
         original = SimpleNamespace(id='100', url='https://x.com/original/status/100')
