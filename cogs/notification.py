@@ -348,12 +348,6 @@ class Notification(Cog_Extension):
             ephemeral=True,
         )
 
-    @customize_group.command(name='delay', description='Legacy alias for the post-detection send delay.')
-    @app_commands.describe(minutes='Minutes to wait after a tweet is found (0 to 60).')
-    async def customize_delay(self, itn: discord.Interaction, minutes: app_commands.Range[int, 0, 60]):
-        """Backward-compatible alias for the post-detection send delay."""
-        await self._set_send_delay(itn, minutes)
-
     @customize_group.command(name='send-delay', description='Set how long to wait after finding a tweet before sending it.')
     @app_commands.describe(minutes='Minutes to wait after a tweet is found (0 to 60).')
     async def customize_send_delay(self, itn: discord.Interaction, minutes: app_commands.Range[int, 0, 60]):
