@@ -61,9 +61,13 @@ Tweetcord is a Discord bot that leverages the [tweety-ns package](https://github
 | `channel` | str | The channel id which set to delivers notifications |
 | `username` | str | The username of the twitter user you want to turn off notifications for |
 
-👉 `/list accounts`
+👉 `/list accounts` | `channel`
 
-- List each unique X account whose notifications are enabled on the current server
+- List each unique X account whose notifications are enabled on the current server. Optionally select `channel` to show only the accounts tracked there.
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `channel` | discord.TextChannel \| discord.Thread | Optional channel to filter; leave blank to include every channel in the server |
 
 👉 `/list settings` | `account` `channel`
 
