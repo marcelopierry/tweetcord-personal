@@ -7,7 +7,7 @@ from types import SimpleNamespace
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.classes import ParsedTweet
-from src.notification.delivery import TweetDelivery, _ordered_candidates, build_delivery_links, build_delivery_text, build_quote_original_embed, build_tweet_embed, build_webhook_identity, extract_youtube_urls, get_delivery_references, media_candidates
+from src.notification.delivery import TweetDelivery, _ordered_candidates, build_delivery_links, build_delivery_text, build_quote_original_embed, build_tweet_embed, build_webhook_identity, extract_external_urls, extract_youtube_urls, get_delivery_references, media_candidates
 
 
 class TestTweetDeliveryHelpers(unittest.TestCase):
@@ -51,6 +51,37 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
         self.assertEqual(extract_youtube_urls(text), [
             'https://youtube.com/shorts/abc123',
             'https://m.youtube.com/watch?v=xyz789',
+        ])
+
+    def test_external_article_links_are_extracted_from_discord_markdown(self):
+        text = (
+            'Read [the full article](https://www.nytimes.com/athletic/7551353/story/) '
+            'and visit https://example.com/news?team=giants.'
+        )
+        self.assertEqual(extract_external_urls(text), [
+            'https://www.nytimes.com/athletic/7551353/story/',
+            'https://example.com/news?team=giants',
+        ])
+
+    def test_external_links_are_deduplicated_and_x_links_are_ignored(self):
+        text = (
+            '[Article](https://example.com/story) https://example.com/story '
+            '[@account](https://twitter.com/account) '
+            'https://x.com/account/status/123'
+        )
+        self.assertEqual(extract_external_urls(text), ['https://example.com/story'])
+
+    def test_each_external_link_keeps_its_first_appearance_order(self):
+        text = 'https://first.example/a [Second](https://second.example/b) https://first.example/a'
+        self.assertEqual(extract_external_urls(text), [
+            'https://first.example/a',
+            'https://second.example/b',
+        ])
+
+    def test_markdown_url_can_end_in_balanced_parentheses(self):
+        text = '[Reference](https://example.com/wiki/Football_(American))'
+        self.assertEqual(extract_external_urls(text), [
+            'https://example.com/wiki/Football_(American)',
         ])
 
     def test_retweet_claims_original_id_for_deduplication(self):
