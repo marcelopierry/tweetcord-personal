@@ -5,12 +5,13 @@ A private, self-hosted Discord bot for forwarding posts from selected X/Twitter 
 ## What is customized
 
 - Three-minute delivery delay by default (`notification_delay_seconds: 180`). A queued post is refreshed if a later poll sees a changed version before delivery.
-- `/customize send-delay` changes that post-detection delay persistently and immediately reschedules every queued post. `/customize delay` remains as a compatibility alias.
+- `/customize send-delay` changes that post-detection delay persistently and immediately reschedules every queued post.
 - Lower polling frequency by default (`tweets_check_period: 60`) to reduce scraping pressure for a personal installation.
 - Per-notifier controls for original posts, retweets, and quote posts remain available through `/add notifier` and `/customize settings`.
 - Tweet text is displayed in a compact Discord embed card while links and uploaded media remain separate. Quote-post links come first, followed by `🔁` and the referenced original. Retweets use `🔄` and are suppressed per channel when that original has already been delivered; quote tweets are never suppressed merely because their original was seen.
 - Deliveries use a channel webhook when the bot has **Manage Webhooks**, so each post can display the tracked X account's name and avatar without changing the bot's global identity. The bot falls back to its normal identity if that permission is unavailable.
 - With `embed.type: built_in`, photos and videos are downloaded and uploaded as Discord attachments when they fit the channel upload limit. Uploaded videos play in Discord; oversized media falls back to a direct media URL instead of requiring the X post page.
+- YouTube links found in tweet text are sent as separate follow-up links so Discord can render its native playable YouTube preview below the tweet card.
 - Startup defaults to ignoring the backlog from before the bot came online (`init_latest_tweet_on_startup: true`).
 
 The delay reduces duplicate noise from quick changes, but no unauthenticated X scraper can guarantee that a deleted post is never seen or that every edit is observable.
