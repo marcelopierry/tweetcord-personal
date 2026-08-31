@@ -339,17 +339,26 @@ class Notification(Cog_Extension):
                 else:
                     await itn.followup.send(t('notification.customize.translation.user_not_found', username=username), ephemeral=True)
 
-    @customize_group.command(name='delay', description='Set the global delay before new tweets are delivered.')
-    @app_commands.describe(minutes='Delay in minutes for every tracked account (0 to 60).')
-    async def customize_delay(self, itn: discord.Interaction, minutes: app_commands.Range[int, 0, 60]):
-        """Change the persistent global delay and update queued tweets immediately."""
+    async def _set_send_delay(self, itn: discord.Interaction, minutes: int):
         await itn.response.defer(ephemeral=True)
         seconds = int(minutes) * 60
         queued = await self.account_tracker.set_notification_delay(seconds)
         await itn.followup.send(
-            f'Global tweet delay set to **{minutes} minute(s)**. Updated **{queued}** currently queued tweet(s).',
+            f'Post-detection send delay set to **{minutes} minute(s)**. Updated **{queued}** currently queued tweet(s).',
             ephemeral=True,
         )
+
+    @customize_group.command(name='delay', description='Legacy alias for the post-detection send delay.')
+    @app_commands.describe(minutes='Minutes to wait after a tweet is found (0 to 60).')
+    async def customize_delay(self, itn: discord.Interaction, minutes: app_commands.Range[int, 0, 60]):
+        """Backward-compatible alias for the post-detection send delay."""
+        await self._set_send_delay(itn, minutes)
+
+    @customize_group.command(name='send-delay', description='Set how long to wait after finding a tweet before sending it.')
+    @app_commands.describe(minutes='Minutes to wait after a tweet is found (0 to 60).')
+    async def customize_send_delay(self, itn: discord.Interaction, minutes: app_commands.Range[int, 0, 60]):
+        """Change the persistent post-detection delay and reschedule queued tweets."""
+        await self._set_send_delay(itn, minutes)
 
     @r_notifier.autocomplete('channel_id')
     async def get_channels_for_r_notifier(self, itn: discord.Interaction, input_channel: str) -> list[app_commands.Choice[str]]:        
