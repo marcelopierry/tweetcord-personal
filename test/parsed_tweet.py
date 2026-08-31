@@ -122,6 +122,25 @@ class TestParsedTweet(unittest.TestCase):
         self.assertIn("> Quote Content", content)
         self.assertNotIn("('Main Content', False)", content)
 
+    def test_quote_author_avatar_is_retained(self):
+        parsed = ParsedTweet({
+            'tweet': {
+                'raw_text': {'text': 'Commentary'},
+                'author': {'screen_name': 'quoter'},
+                'quote': {
+                    'raw_text': {'text': 'Original'},
+                    'author': {
+                        'screen_name': 'original',
+                        'name': 'Original Author',
+                        'avatar_url': 'https://pbs.twimg.com/original.jpg',
+                    },
+                },
+                'media': {'all': []},
+                'translation': {},
+            },
+        })
+        self.assertEqual(parsed.quote.avatar_url, 'https://pbs.twimg.com/original.jpg')
+
     def test_markdown_escaping(self):
         """Test that ParsedTweet escapes markdown in source text."""
         source = {
