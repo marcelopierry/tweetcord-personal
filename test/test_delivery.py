@@ -7,7 +7,7 @@ from types import SimpleNamespace
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.classes import ParsedTweet
-from src.notification.delivery import TweetDelivery, _ordered_candidates, build_delivery_links, build_delivery_text, build_webhook_identity, get_delivery_references, media_candidates
+from src.notification.delivery import TweetDelivery, _ordered_candidates, build_delivery_links, build_delivery_text, build_tweet_embed, build_webhook_identity, get_delivery_references, media_candidates
 
 
 class TestTweetDeliveryHelpers(unittest.TestCase):
@@ -59,6 +59,23 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
         name, avatar = build_webhook_identity('DiscussingFilm', tweet, parsed)
         self.assertEqual(name, 'Discussing Film | Personal TweetCord')
         self.assertEqual(avatar, 'https://pbs.twimg.com/profile_images/example_400x400.jpg')
+
+    def test_tweet_text_is_rendered_in_a_compact_embed_card(self):
+        parsed = SimpleNamespace(
+            sender_name='Bobby Skinner',
+            sender_username='BobbySkinner_',
+            sender_avatar_url='https://pbs.twimg.com/profile_images/example_normal.jpg',
+        )
+        tweet = SimpleNamespace(
+            author=SimpleNamespace(name='Bobby Skinner', username='BobbySkinner_', profile_image_url_https=None),
+            created_on=None,
+        )
+        embed = build_tweet_embed('BobbySkinner_', tweet, parsed, 'Tweet body in a box')
+        self.assertEqual(embed.description, 'Tweet body in a box')
+        self.assertEqual(embed.author.name, 'Bobby Skinner (@BobbySkinner_)')
+        self.assertEqual(embed.author.icon_url, 'https://pbs.twimg.com/profile_images/example_400x400.jpg')
+        self.assertEqual(embed.footer.text, 'Personal TweetCord')
+        self.assertIsNone(embed.image.url)
 
     def test_video_candidates_only_use_mp4_formats(self):
         candidates = media_candidates({
@@ -134,6 +151,25 @@ class TestTweetDeliverySend(unittest.IsolatedAsyncioTestCase):
 
         kwargs = webhook.send.await_args.kwargs
         self.assertNotIn('view', kwargs)
+
+    async def test_custom_embed_remains_enabled(self):
+        webhook = SimpleNamespace(send=AsyncMock())
+        delivery = TweetDelivery(SimpleNamespace())
+        delivery._get_webhook = AsyncMock(return_value=webhook)
+        embed = SimpleNamespace()
+
+        await delivery.send(
+            SimpleNamespace(),
+            content='<https://x.com/example/status/1>',
+            username='Example | Personal TweetCord',
+            avatar_url=None,
+            embeds=[embed],
+            suppress_embeds=False,
+        )
+
+        kwargs = webhook.send.await_args.kwargs
+        self.assertEqual(kwargs['embeds'], [embed])
+        self.assertFalse(kwargs['suppress_embeds'])
 
 
 if __name__ == '__main__':
