@@ -37,6 +37,19 @@ class ListUsers(Cog_Extension):
             """, (str(server_id), account, account, channel, channel)) as cursor:
                 return await cursor.fetchall()
 
+    async def _get_account_usernames(self, server_id: int, channel_id: str = '') -> list[str]:
+        async with connect_readonly(os.path.join(os.getenv('DATA_PATH'), 'tracked_accounts.db')) as db:
+            async with db.execute("""
+                SELECT DISTINCT user.username
+                FROM user
+                JOIN notification ON user.id = notification.user_id
+                JOIN channel ON notification.channel_id = channel.id
+                WHERE channel.server_id = ? AND notification.enabled = 1
+                AND (channel.id = ? OR '' = ?)
+                ORDER BY user.username COLLATE NOCASE
+            """, (str(server_id), channel_id, channel_id)) as cursor:
+                return [row[0] async for row in cursor]
+
     async def _send_settings(self, itn: discord.Interaction, account: str = '', channel: str = '') -> None:
         user_channel_role_data = await self._get_settings_rows(itn.guild_id, account, channel)
 
@@ -97,30 +110,29 @@ class ListUsers(Cog_Extension):
         """Show enabled notifier settings, including retweet and quote choices."""
         await self._send_settings(itn, account, channel)
 
-    @list_group.command(name='accounts', description='Show every X account currently tracked in this server.')
-    async def list_accounts(self, itn: discord.Interaction) -> None:
-        """Show a deduplicated, server-scoped list of tracked X accounts."""
-        async with connect_readonly(os.path.join(os.getenv('DATA_PATH'), 'tracked_accounts.db')) as db:
-            async with db.execute("""
-                SELECT DISTINCT user.username
-                FROM user
-                JOIN notification ON user.id = notification.user_id
-                JOIN channel ON notification.channel_id = channel.id
-                WHERE channel.server_id = ? AND notification.enabled = 1
-                ORDER BY user.username COLLATE NOCASE
-            """, (str(itn.guild_id),)) as cursor:
-                usernames = [row[0] async for row in cursor]
+    @list_group.command(name='accounts', description='Show tracked X accounts, optionally filtered by channel.')
+    @app_commands.describe(channel='Optional channel to filter by; defaults to every channel')
+    async def list_accounts(
+        self,
+        itn: discord.Interaction,
+        channel: discord.TextChannel | discord.Thread = None,
+    ) -> None:
+        """Show a deduplicated list of tracked X accounts, optionally for one channel."""
+        channel_id = str(channel.id) if channel else ''
+        usernames = await self._get_account_usernames(itn.guild_id, channel_id)
 
         async def get_page(page: int):
             offset = (page - 1) * PSIZE
             page_usernames = usernames[offset:offset + PSIZE]
             total_pages = Pagination.compute_total_pages(len(usernames), PSIZE)
             page_counter = f' — page {page}/{total_pages}' if PCPOS == 'title' else ''
-            description = 'No X accounts are currently tracked in this server.' if not usernames else '\n'.join(
+            empty_scope = channel.mention if channel else 'this server'
+            description = f'No X accounts are currently tracked in {empty_scope}.' if not usernames else '\n'.join(
                 f'{i + offset + 1}. `@{username}`' for i, username in enumerate(page_usernames)
             )
+            scope = f' in #{channel.name}' if channel else f' in {itn.guild.name}'
             embed = discord.Embed(
-                title=f'Tracked X accounts in {itn.guild.name}{page_counter}',
+                title=f'Tracked X accounts{scope}{page_counter}',
                 description=description,
                 color=0x778899,
             )
