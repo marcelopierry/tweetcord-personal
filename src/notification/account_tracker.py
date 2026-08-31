@@ -15,7 +15,7 @@ from configs.load_configs import configs, IS_TRANSLATION_ENABLED
 from src.i18n import t
 from src.log import setup_logger
 from src.notification.display_tools import get_action
-from src.notification.delivery import TweetDelivery, build_delivery_links, build_delivery_text, build_webhook_identity, get_delivery_references, prepare_media_delivery
+from src.notification.delivery import TweetDelivery, build_delivery_links, build_delivery_text, build_tweet_embed, build_webhook_identity, get_delivery_references, prepare_media_delivery
 from src.notification.delivery_history import DeliveryHistory
 from src.notification.get_tweets import get_tweets
 from src.notification.delay_queue import DelayedTweetBuffer
@@ -283,14 +283,13 @@ class AccountTracker():
                             is_retweet=tweet.is_retweet,
                             original_url=original_url,
                         )
+                        tweet_embed = build_tweet_embed(username, tweet, current_p_tweet, tweet_text)
                         message_parts = []
                         if data['customized_msg']:
                             custom = re.sub(r":(\w+):", lambda match: replace_emoji(match, channel.guild), data['customized_msg']) if configs['emoji_auto_format'] else data['customized_msg']
                             message_parts.append(custom.format(mention=mention, author=author, action=action, url=url).rstrip())
                         elif mention:
                             message_parts.append(mention.rstrip())
-                        if tweet_text:
-                            message_parts.append(tweet_text)
                         if links:
                             message_parts.append(links)
                         msg = '\n'.join(part for part in message_parts if part)
@@ -309,10 +308,13 @@ class AccountTracker():
                             content=msg,
                             username=webhook_name,
                             avatar_url=avatar_url,
-                            embeds=None,
+                            embeds=[tweet_embed] if tweet_embed else None,
                             files=media.files,
                             view=current_view,
-                            suppress_embeds=not media.fallback_urls,
+                            # Links are wrapped in angle brackets, so Discord will
+                            # not unfurl them. Leaving embeds enabled preserves the
+                            # tweet-text card while media stays in attachments.
+                            suppress_embeds=False if tweet_embed else not media.fallback_urls,
                         )
 
                     except Exception as e:
