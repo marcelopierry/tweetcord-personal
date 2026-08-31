@@ -15,7 +15,7 @@ from configs.load_configs import configs, IS_TRANSLATION_ENABLED
 from src.i18n import t
 from src.log import setup_logger
 from src.notification.display_tools import get_action
-from src.notification.delivery import TweetDelivery, build_delivery_links, build_delivery_text, build_tweet_embed, build_webhook_identity, extract_youtube_urls, get_delivery_references, prepare_media_delivery
+from src.notification.delivery import TweetDelivery, build_delivery_links, build_delivery_text, build_quote_original_embed, build_tweet_embed, build_webhook_identity, extract_youtube_urls, get_delivery_references, prepare_media_delivery
 from src.notification.delivery_history import DeliveryHistory
 from src.notification.get_tweets import get_tweets
 from src.notification.delay_queue import DelayedTweetBuffer
@@ -284,6 +284,8 @@ class AccountTracker():
                             original_url=original_url,
                         )
                         tweet_embed = build_tweet_embed(username, tweet, current_p_tweet, tweet_text)
+                        original_embed = build_quote_original_embed(tweet, current_p_tweet)
+                        tweet_embeds = [embed for embed in (tweet_embed, original_embed) if embed]
                         youtube_urls = extract_youtube_urls(tweet_text)
                         message_parts = []
                         if data['customized_msg']:
@@ -300,8 +302,6 @@ class AccountTracker():
                             current_p_tweet if EMBED_TYPE == 'built_in' else None,
                             int(channel.guild.filesize_limit),
                         )
-                        if media.fallback_urls:
-                            msg = f'{msg}\n' + '\n'.join(media.fallback_urls)
 
                         webhook_name, avatar_url = build_webhook_identity(username, tweet, current_p_tweet)
                         await self.delivery.send(
@@ -309,19 +309,39 @@ class AccountTracker():
                             content=msg,
                             username=webhook_name,
                             avatar_url=avatar_url,
-                            embeds=[tweet_embed] if tweet_embed else None,
-                            files=media.files,
+                            embeds=tweet_embeds or None,
                             view=current_view,
                             # Links are wrapped in angle brackets, so Discord will
                             # not unfurl them. Leaving embeds enabled preserves the
                             # tweet-text card while media stays in attachments.
-                            suppress_embeds=False if tweet_embed else not media.fallback_urls,
+                            suppress_embeds=False if tweet_embeds else True,
                         )
 
                     except Exception as e:
                         await self.delivery_history.release(channel.id, claim_id)
                         log.error(f'an error occurred at {channel.mention} while sending notification: {e}')
                         continue
+
+                    # Discord places attachments before custom embeds when they
+                    # share a message. A follow-up guarantees the requested order:
+                    # links, quote card, original card, then photos/videos.
+                    if media.files or media.fallback_urls:
+                        media_content = '▷'
+                        if media.fallback_urls:
+                            media_content += '\n' + '\n'.join(media.fallback_urls)
+                        try:
+                            await self.delivery.send(
+                                channel,
+                                content=media_content,
+                                username=webhook_name,
+                                avatar_url=avatar_url,
+                                files=media.files,
+                                suppress_embeds=not media.fallback_urls,
+                            )
+                        except Exception as e:
+                            # The cards already succeeded, so retrying the whole
+                            # tweet would duplicate them. Keep media best-effort.
+                            log.warning(f'failed to send media follow-up for {tweet.url}: {e}')
 
                     # YouTube needs an ordinary, unsuppressed message link for
                     # Discord to generate its native playable preview. Sending it
