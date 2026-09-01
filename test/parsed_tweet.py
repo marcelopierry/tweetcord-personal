@@ -86,8 +86,8 @@ class TestParsedTweet(unittest.TestCase):
         self.assertTrue(is_simplified)
         self.assertTrue(len(result) < 700)
 
-    def test_rt_translation_preservation(self):
-        """Test that RT information is preserved in trans_text when it's an RT."""
+    def test_retweet_text_does_not_add_a_synthetic_rt_prefix(self):
+        """Retweet cards display the original text without an RT wrapper."""
         rt_source_dict = {
             'tweet': {
                 'raw_text': {'text': 'Original Text'},
@@ -99,13 +99,11 @@ class TestParsedTweet(unittest.TestCase):
         }
         rt_parsed_tweet = ParsedTweet(rt_source_dict)
         
-        # Check if RT prefix is added to both text and trans_text
-        self.assertEqual(rt_parsed_tweet.text, "RT [@original_author](https://twitter.com/original_author): Original Text")
-        self.assertEqual(rt_parsed_tweet.trans_text, "RT [@original_author](https://twitter.com/original_author): Translated Text")
-        
-        # Verify get_text output contains the RT prefix
+        self.assertEqual(rt_parsed_tweet.text, "Original Text")
+        self.assertEqual(rt_parsed_tweet.trans_text, "Translated Text")
+
         result, _ = rt_parsed_tweet.get_text()
-        self.assertIn("RT [@original_author](https://twitter.com/original_author):", result)
+        self.assertNotIn("RT [@original_author]", result)
         self.assertIn("Translated Text", result)
 
     def test_get_quote_text_repro(self):
@@ -140,6 +138,49 @@ class TestParsedTweet(unittest.TestCase):
             },
         })
         self.assertEqual(parsed.quote.avatar_url, 'https://pbs.twimg.com/original.jpg')
+
+    def test_quote_and_original_media_are_kept_separate(self):
+        parsed = ParsedTweet({
+            'tweet': {
+                'raw_text': {'text': 'Commentary'},
+                'author': {'screen_name': 'quoter'},
+                'media': {
+                    'all': [{'type': 'photo', 'url': 'https://pbs.twimg.com/quote.jpg'}],
+                },
+                'quote': {
+                    'raw_text': {'text': 'Original'},
+                    'author': {'screen_name': 'original'},
+                    'media': {
+                        'all': [{
+                            'type': 'video',
+                            'url': 'https://video.twimg.com/original.mp4',
+                            'thumbnail_url': 'https://pbs.twimg.com/original-thumb.jpg',
+                        }],
+                    },
+                },
+                'translation': {},
+            },
+        })
+        self.assertEqual(parsed.media.items[0]['url'], 'https://pbs.twimg.com/quote.jpg')
+        self.assertEqual(parsed.quote_media.items[0]['url'], 'https://video.twimg.com/original.mp4')
+        self.assertEqual(parsed.length, 2)
+
+    def test_quote_only_media_does_not_get_misclassified_as_main_media(self):
+        parsed = ParsedTweet({
+            'tweet': {
+                'raw_text': {'text': 'Commentary'},
+                'author': {'screen_name': 'quoter'},
+                'media': {'all': []},
+                'quote': {
+                    'raw_text': {'text': 'Original'},
+                    'author': {'screen_name': 'original'},
+                    'media': {'all': [{'type': 'photo', 'url': 'https://pbs.twimg.com/original.jpg'}]},
+                },
+                'translation': {},
+            },
+        })
+        self.assertEqual(parsed.media.items, [])
+        self.assertEqual(parsed.quote_media.items[0]['url'], 'https://pbs.twimg.com/original.jpg')
 
     def test_markdown_escaping(self):
         """Test that ParsedTweet escapes markdown in source text."""
