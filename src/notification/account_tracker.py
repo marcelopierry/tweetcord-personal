@@ -15,7 +15,7 @@ from configs.load_configs import configs, IS_TRANSLATION_ENABLED
 from src.i18n import t
 from src.log import setup_logger
 from src.notification.display_tools import get_action
-from src.notification.delivery import TweetDelivery, build_delivery_links, build_delivery_text, build_quote_original_embed, build_tweet_embed, build_webhook_identity, extract_external_urls, get_delivery_references, prepare_media_delivery
+from src.notification.delivery import ChannelDeliverySequencer, TweetDelivery, build_delivery_links, build_delivery_text, build_quote_original_embed, build_tweet_embed, build_webhook_identity, extract_video_urls, get_delivery_references, prepare_media_delivery
 from src.notification.delivery_history import DeliveryHistory
 from src.notification.get_tweets import get_tweets
 from src.notification.delay_queue import DelayedTweetBuffer
@@ -41,6 +41,7 @@ class AccountTracker():
         self.notification_delay_seconds = int(configs.get('notification_delay_seconds', 180))
         self.session = None
         self.delivery = TweetDelivery(bot)
+        self.delivery_sequencer = ChannelDeliverySequencer()
         self.delivery_history = DeliveryHistory(self.db_path)
         # Responsible for processing queries and writing timestamps
         self.db_write_queue = asyncio.Queue()
@@ -154,6 +155,138 @@ class AccountTracker():
             except Exception as e:
                 log.error(f"error in db_writer: {e}")
 
+    async def _deliver_tweet_to_channel(
+        self,
+        username: str,
+        tweet,
+        data,
+        channel,
+        parsed_tweet: ParsedTweet | None,
+        view: discord.ui.View | None,
+        lang: str | None,
+    ) -> None:
+        """Send every component of one tweet while holding its channel lock."""
+        references = get_delivery_references(tweet, parsed_tweet)
+        claim_id = references.claim_id
+        if not await self.delivery_history.claim(channel.id, claim_id):
+            log.info(
+                f'skipping already delivered tweet {claim_id} in channel {channel.id} '
+                f'(tracked account: {username}, wrapper: {references.tweet_id})'
+            )
+            return
+
+        try:
+            url = tweet.url
+            original_url = references.original_url
+            if EMBED_TYPE == 'proxy':
+                url = url.replace('twitter', DOMAIN_NAME)
+                if IS_TRANSLATION_ENABLED:
+                    url += f'/{lang}'
+                if original_url:
+                    original_url = original_url.replace('twitter', DOMAIN_NAME)
+                    if IS_TRANSLATION_ENABLED:
+                        original_url += f'/{lang}'
+
+            mention = f"{channel.guild.get_role(int(data['role_id'])).mention} " if data['role_id'] else ''
+            author, action = tweet.author.name, get_action(tweet)
+            tweet_text = build_delivery_text(tweet, parsed_tweet)
+            links = build_delivery_links(
+                url,
+                parsed_tweet,
+                tweet.is_quoted,
+                is_retweet=tweet.is_retweet,
+                original_url=original_url,
+            )
+            tweet_embed = build_tweet_embed(username, tweet, parsed_tweet, tweet_text)
+            original_embed = build_quote_original_embed(tweet, parsed_tweet)
+            tweet_embeds = [embed for embed in (tweet_embed, original_embed) if embed]
+            preview_text = '\n'.join(
+                part for part in (
+                    tweet_text,
+                    original_embed.description if original_embed else None,
+                )
+                if part
+            )
+            video_urls = extract_video_urls(preview_text)
+
+            message_parts = []
+            if data['customized_msg']:
+                custom = re.sub(r":(\w+):", lambda match: replace_emoji(match, channel.guild), data['customized_msg']) if configs['emoji_auto_format'] else data['customized_msg']
+                message_parts.append(custom.format(mention=mention, author=author, action=action, url=url).rstrip())
+            elif mention:
+                message_parts.append(mention.rstrip())
+            if links:
+                message_parts.append(links)
+            msg = '\n'.join(part for part in message_parts if part)
+
+            upload_limit = int(channel.guild.filesize_limit)
+            primary_media = await prepare_media_delivery(
+                self.session,
+                parsed_tweet.media if EMBED_TYPE == 'built_in' and parsed_tweet else None,
+                upload_limit,
+                filename_prefix='quote' if tweet.is_quoted and not tweet.is_retweet else 'tweet',
+            )
+            original_media = await prepare_media_delivery(
+                self.session,
+                parsed_tweet.quote_media if EMBED_TYPE == 'built_in' and parsed_tweet and tweet.is_quoted else None,
+                upload_limit,
+                filename_prefix='original',
+            )
+
+            webhook_name, avatar_url = build_webhook_identity(username, tweet, parsed_tweet)
+            await self.delivery.send(
+                channel,
+                content=msg,
+                username=webhook_name,
+                avatar_url=avatar_url,
+                embeds=tweet_embeds or None,
+                view=view,
+                suppress_embeds=False if tweet_embeds else True,
+            )
+        except Exception as error:
+            await self.delivery_history.release(channel.id, claim_id)
+            log.error(f'an error occurred at {channel.mention} while sending notification: {error}')
+            return
+
+        # Send main/quote media first, then the quoted original's media. Keeping
+        # these as separate messages preserves both grouping and visual order.
+        for label, media in (('tweet', primary_media), ('quoted original', original_media)):
+            if not media.files and not media.fallback_urls:
+                continue
+            media_content = '▷'
+            if media.fallback_urls:
+                media_content += '\n' + '\n'.join(media.fallback_urls)
+            try:
+                await self.delivery.send(
+                    channel,
+                    content=media_content,
+                    username=webhook_name,
+                    avatar_url=avatar_url,
+                    files=media.files,
+                    suppress_embeds=not media.fallback_urls,
+                )
+            except Exception as error:
+                log.warning(f'failed to send {label} media follow-up for {tweet.url}: {error}')
+
+        # Only known video links receive separate native previews. Article and
+        # general website links stay solely inside the text card.
+        for video_url in video_urls:
+            try:
+                await self.delivery.send(
+                    channel,
+                    content=f'↧\n{video_url}',
+                    username=webhook_name,
+                    avatar_url=avatar_url,
+                    suppress_embeds=False,
+                )
+            except Exception as error:
+                log.warning(f'failed to send video-link preview for {video_url}: {error}')
+
+        try:
+            await self.delivery_history.record(channel.id, *references.record_ids)
+        except Exception as error:
+            log.error(f'failed to update delivery history for channel {channel.id}: {error}')
+
     async def notification(self, username: str, client_used: str):
         while True:
             await asyncio.sleep(configs['tweets_check_period'])
@@ -250,131 +383,19 @@ class AccountTracker():
                     if not is_match_media_type(current_p_tweet if current_p_tweet else tweet, data['enable_media_type']):
                         continue
 
-                    references = get_delivery_references(tweet, current_p_tweet)
-                    original_url = references.original_url
-
-                    # Retweets reserve the original ID, so any original/retweet
-                    # already delivered to this channel suppresses the duplicate.
-                    # Quotes reserve their own ID and therefore always deliver.
-                    claim_id = references.claim_id
-                    if not await self.delivery_history.claim(channel.id, claim_id):
-                        log.info(f'skipping already delivered tweet {claim_id} in channel {channel.id}')
-                        continue
-
-                    try:
-                        url = tweet.url
-                        if EMBED_TYPE == 'proxy':
-                            url = url.replace('twitter', DOMAIN_NAME)
-                            if IS_TRANSLATION_ENABLED:
-                                url += f"/{lang}"
-                            if original_url:
-                                original_url = original_url.replace('twitter', DOMAIN_NAME)
-                                if IS_TRANSLATION_ENABLED:
-                                    original_url += f"/{lang}"
-
-                        mention = f"{channel.guild.get_role(int(data['role_id'])).mention} " if data['role_id'] else ''
-                        author, action = tweet.author.name, get_action(tweet)
-
-                        tweet_text = build_delivery_text(tweet, current_p_tweet)
-                        links = build_delivery_links(
-                            url,
-                            current_p_tweet,
-                            tweet.is_quoted,
-                            is_retweet=tweet.is_retweet,
-                            original_url=original_url,
-                        )
-                        tweet_embed = build_tweet_embed(username, tweet, current_p_tweet, tweet_text)
-                        original_embed = build_quote_original_embed(tweet, current_p_tweet)
-                        tweet_embeds = [embed for embed in (tweet_embed, original_embed) if embed]
-                        preview_text = '\n'.join(
-                            part for part in (
-                                tweet_text,
-                                original_embed.description if original_embed else None,
-                            )
-                            if part
-                        )
-                        external_urls = extract_external_urls(preview_text)
-                        message_parts = []
-                        if data['customized_msg']:
-                            custom = re.sub(r":(\w+):", lambda match: replace_emoji(match, channel.guild), data['customized_msg']) if configs['emoji_auto_format'] else data['customized_msg']
-                            message_parts.append(custom.format(mention=mention, author=author, action=action, url=url).rstrip())
-                        elif mention:
-                            message_parts.append(mention.rstrip())
-                        if links:
-                            message_parts.append(links)
-                        msg = '\n'.join(part for part in message_parts if part)
-
-                        media = await prepare_media_delivery(
-                            self.session,
-                            current_p_tweet if EMBED_TYPE == 'built_in' else None,
-                            int(channel.guild.filesize_limit),
-                        )
-
-                        webhook_name, avatar_url = build_webhook_identity(username, tweet, current_p_tweet)
-                        await self.delivery.send(
+                    # Different account tasks may target the same channel at the
+                    # same moment. Hold the channel lock until links, cards, both
+                    # media groups, previews, and history are all complete.
+                    async with self.delivery_sequencer.lock_for(channel.id):
+                        await self._deliver_tweet_to_channel(
+                            username,
+                            tweet,
+                            data,
                             channel,
-                            content=msg,
-                            username=webhook_name,
-                            avatar_url=avatar_url,
-                            embeds=tweet_embeds or None,
-                            view=current_view,
-                            # Links are wrapped in angle brackets, so Discord will
-                            # not unfurl them. Leaving embeds enabled preserves the
-                            # tweet-text card while media stays in attachments.
-                            suppress_embeds=False if tweet_embeds else True,
+                            current_p_tweet,
+                            current_view,
+                            lang,
                         )
-
-                    except Exception as e:
-                        await self.delivery_history.release(channel.id, claim_id)
-                        log.error(f'an error occurred at {channel.mention} while sending notification: {e}')
-                        continue
-
-                    # Discord places attachments before custom embeds when they
-                    # share a message. A follow-up guarantees the requested order:
-                    # links, quote card, original card, then photos/videos.
-                    if media.files or media.fallback_urls:
-                        media_content = '▷'
-                        if media.fallback_urls:
-                            media_content += '\n' + '\n'.join(media.fallback_urls)
-                        try:
-                            await self.delivery.send(
-                                channel,
-                                content=media_content,
-                                username=webhook_name,
-                                avatar_url=avatar_url,
-                                files=media.files,
-                                suppress_embeds=not media.fallback_urls,
-                            )
-                        except Exception as e:
-                            # The cards already succeeded, so retrying the whole
-                            # tweet would duplicate them. Keep media best-effort.
-                            log.warning(f'failed to send media follow-up for {tweet.url}: {e}')
-
-                    # External links need ordinary, unsuppressed messages for
-                    # Discord to generate native article, website, and video
-                    # previews. Keep each preview below the card and media.
-                    for external_url in external_urls:
-                        try:
-                            await self.delivery.send(
-                                channel,
-                                content=f'↧\n{external_url}',
-                                username=webhook_name,
-                                avatar_url=avatar_url,
-                                suppress_embeds=False,
-                            )
-                        except Exception as e:
-                            # The primary tweet already succeeded, so a failed
-                            # optional preview must not release its dedupe claim.
-                            log.warning(f'failed to send external-link preview for {external_url}: {e}')
-
-                    # The reservation already records claim_id. Also retain the
-                    # wrapper/quote ID and referenced original for future checks.
-                    # Keep the reservation if bookkeeping fails after a successful
-                    # Discord send, otherwise a retry could create a duplicate.
-                    try:
-                        await self.delivery_history.record(channel.id, references.tweet_id, references.original_id)
-                    except Exception as e:
-                        log.error(f'failed to update delivery history for channel {channel.id}: {e}')
 
     async def tweetsUpdater(self, app: Twitter):
         updater_name = asyncio.current_task().get_name().split('_', 1)[1]
