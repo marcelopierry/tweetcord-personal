@@ -6,7 +6,7 @@
 
 ## Personal fork defaults
 
-This personal fork defaults to a 60-second poll interval and a 180-second post-detection send delay. The delay lets a later poll replace a queued tweet with its edited representation before it is sent. `/customize send-delay` persists a new global delay and retroactively reschedules queued posts. Original posts, retweets, quote tweets, photos, videos, GIF previews, and separate native previews for external article, website, and video links remain supported; retweet/quote behavior is configured per `/add notifier` entry or with `/customize settings`. Grant the bot **Manage Webhooks** in each destination channel to show every delivered post under the tracked X account's name and avatar.
+This personal fork defaults to a 60-second poll interval and a 180-second post-detection send delay. The delay lets a later poll replace a queued tweet with its edited representation before it is sent. `/customize send-delay` persists a new global delay and retroactively reschedules queued posts. Original posts, retweets, quote tweets, photos, videos, GIF previews, and separate native previews for known video links remain supported; article links stay in the text card. Quote-post media and quoted-original media are delivered in separate ordered groups. Retweets use the retweeter's webhook identity with the original author's text card, and quote context no longer suppresses a later retweet of that original. Every multipart delivery is serialized per channel. Retweet/quote behavior is configured per `/add notifier` entry or with `/customize settings`. Grant the bot **Manage Webhooks** in each destination channel to show every delivered post under the tracked X account's name and avatar.
 
 A Discord Bot for Twitter Notifications
 
