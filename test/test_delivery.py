@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 import unittest
@@ -7,7 +8,7 @@ from types import SimpleNamespace
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.classes import ParsedTweet
-from src.notification.delivery import TweetDelivery, _ordered_candidates, build_delivery_links, build_delivery_text, build_quote_original_embed, build_tweet_embed, build_webhook_identity, extract_external_urls, extract_youtube_urls, get_delivery_references, media_candidates
+from src.notification.delivery import ChannelDeliverySequencer, TweetDelivery, _ordered_candidates, build_delivery_links, build_delivery_text, build_quote_original_embed, build_tweet_embed, build_webhook_identity, extract_external_urls, extract_video_urls, extract_youtube_urls, get_delivery_references, media_candidates
 
 
 class TestTweetDeliveryHelpers(unittest.TestCase):
@@ -16,7 +17,7 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
         links = build_delivery_links('https://x.com/tracked/status/2', parsed, is_quote=True)
         self.assertEqual(links, '<https://x.com/tracked/status/2>\n🔁 <https://x.com/original/status/1>')
 
-    def test_retweet_links_to_original_with_retweet_emoji(self):
+    def test_retweet_delivers_wrapper_then_original_link(self):
         links = build_delivery_links(
             'https://x.com/tracked/status/2',
             None,
@@ -24,7 +25,10 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
             is_retweet=True,
             original_url='https://x.com/original/status/1',
         )
-        self.assertEqual(links, '🔄 <https://x.com/original/status/1>')
+        self.assertEqual(
+            links,
+            '<https://x.com/tracked/status/2>\n🔄 <https://x.com/original/status/1>',
+        )
 
     def test_delivery_text_uses_parsed_tweet_body(self):
         parsed = SimpleNamespace(get_text=lambda simplified_content: ('The tweet body', False))
@@ -84,19 +88,49 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
             'https://example.com/wiki/Football_(American)',
         ])
 
+    def test_only_video_links_receive_separate_previews(self):
+        text = (
+            '[Article](https://example.com/news/story) '
+            'https://youtu.be/video123 '
+            'https://cdn.example.com/clip.mp4 '
+            'https://vimeo.com/123456'
+        )
+        self.assertEqual(extract_video_urls(text), [
+            'https://youtu.be/video123',
+            'https://cdn.example.com/clip.mp4',
+            'https://vimeo.com/123456',
+        ])
+
     def test_retweet_claims_original_id_for_deduplication(self):
         original = SimpleNamespace(id='100', url='https://x.com/original/status/100')
         tweet = SimpleNamespace(id='200', url='https://x.com/tracked/status/200', is_retweet=True, is_quoted=False, retweeted_tweet=original)
         references = get_delivery_references(tweet, None)
-        self.assertEqual(references.claim_id, '100')
+        self.assertEqual(references.claim_id, 'original:100')
         self.assertEqual(references.tweet_id, '200')
+        self.assertEqual(references.record_ids, ('post:200', 'original:100'))
 
     def test_quote_claims_its_own_id_even_when_original_was_seen(self):
         original = SimpleNamespace(id='100', url='https://x.com/original/status/100')
         tweet = SimpleNamespace(id='200', url='https://x.com/tracked/status/200', is_retweet=False, is_quoted=True, quoted_tweet=original)
         references = get_delivery_references(tweet, None)
-        self.assertEqual(references.claim_id, '200')
+        self.assertEqual(references.claim_id, 'post:200')
         self.assertEqual(references.original_id, '100')
+        self.assertEqual(references.record_ids, ('post:200',))
+
+    def test_direct_original_and_retweet_share_the_same_dedupe_key(self):
+        direct = SimpleNamespace(
+            id='100', url='https://x.com/original/status/100',
+            is_retweet=False, is_quoted=False, quoted_tweet=None,
+        )
+        retweet = SimpleNamespace(
+            id='200', url='https://x.com/tracked/status/200',
+            is_retweet=True, is_quoted=False,
+            retweeted_tweet=SimpleNamespace(id='100', url=direct.url),
+        )
+        self.assertEqual(
+            get_delivery_references(direct, None).claim_id,
+            get_delivery_references(retweet, None).claim_id,
+        )
 
     def test_quote_original_is_rendered_as_a_second_card(self):
         source = SimpleNamespace(
@@ -156,6 +190,34 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
         self.assertEqual(embed.footer.text, 'Personal TweetCord')
         self.assertIsNone(embed.image.url)
 
+    def test_retweet_card_uses_original_author_while_webhook_uses_retweeter(self):
+        original_author = SimpleNamespace(
+            name='Charlotte Carroll',
+            username='charlottecrrll',
+            profile_image_url_https='https://pbs.twimg.com/original_normal.jpg',
+        )
+        original = SimpleNamespace(author=original_author, created_on=None)
+        tweet = SimpleNamespace(
+            is_retweet=True,
+            retweeted_tweet=original,
+            author=SimpleNamespace(name='Dan Duggan', username='DDuggan21'),
+        )
+        parsed = SimpleNamespace(
+            sender_name='Dan Duggan',
+            sender_username='DDuggan21',
+            sender_avatar_url='https://pbs.twimg.com/retweeter_normal.jpg',
+            author_name='Charlotte Carroll',
+            author_username='charlottecrrll',
+            author_avatar_url='https://pbs.twimg.com/original_normal.jpg',
+        )
+
+        webhook_name, _ = build_webhook_identity('DDuggan21', tweet, parsed)
+        embed = build_tweet_embed('DDuggan21', tweet, parsed, 'Original tweet text')
+
+        self.assertEqual(webhook_name, 'Dan Duggan | Personal TweetCord')
+        self.assertEqual(embed.author.name, 'Charlotte Carroll (@charlottecrrll)')
+        self.assertEqual(embed.description, 'Original tweet text')
+
     def test_video_candidates_only_use_mp4_formats(self):
         candidates = media_candidates({
             'type': 'video',
@@ -172,6 +234,12 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
         ])
         ordered = _ordered_candidates(candidates, limit=10)
         self.assertEqual(ordered[0].url, 'https://video.twimg.com/high.mp4')
+
+    def test_media_filename_prefix_distinguishes_quote_and_original(self):
+        quote = media_candidates({'type': 'photo', 'url': 'https://pbs.twimg.com/quote.jpg'}, 1, 'quote')
+        original = media_candidates({'type': 'photo', 'url': 'https://pbs.twimg.com/original.jpg'}, 1, 'original')
+        self.assertEqual(quote[0].filename, 'quote-photo-1.jpg')
+        self.assertEqual(original[0].filename, 'original-photo-1.jpg')
 
     def test_parsed_tweet_keeps_fx_media_and_retweet_sender(self):
         parsed = ParsedTweet({
@@ -195,10 +263,38 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
             },
         })
         self.assertEqual(parsed.sender_username, 'DiscussingFilm')
+        self.assertEqual(parsed.author_username, 'original')
+        self.assertEqual(parsed.text, 'hello')
         self.assertEqual(parsed.media.items[0]['formats'][0]['url'], 'https://video.twimg.com/video.mp4')
 
 
 class TestTweetDeliverySend(unittest.IsolatedAsyncioTestCase):
+    async def test_channel_sequencer_keeps_multipart_deliveries_together(self):
+        sequencer = ChannelDeliverySequencer()
+        first_started = asyncio.Event()
+        events = []
+
+        async def first():
+            async with sequencer.lock_for(123):
+                events.append('first-link')
+                first_started.set()
+                await asyncio.sleep(0)
+                events.append('first-media')
+
+        async def second():
+            await first_started.wait()
+            async with sequencer.lock_for(123):
+                events.append('second-link')
+                events.append('second-media')
+
+        await asyncio.gather(first(), second())
+        self.assertEqual(events, [
+            'first-link',
+            'first-media',
+            'second-link',
+            'second-media',
+        ])
+
     async def test_none_view_is_omitted_from_regular_message(self):
         channel = SimpleNamespace(send=AsyncMock())
         delivery = TweetDelivery(SimpleNamespace())
