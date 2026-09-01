@@ -43,8 +43,10 @@ class ParsedTweet():
     
     def __init__(self, source: Tweet | BeautifulSoup | dict):
         self.media = self.Media()
+        self.quote_media = self.Media()
         self.quote = self.Quote()
         self.sender_name, self.sender_username, self.sender_avatar_url = None, None, None
+        self.author_name, self.author_username, self.author_avatar_url = None, None, None
         
         self.text, self.trans_text, self.trans_lang = None, None, None
         self.is_mixed = False
@@ -53,23 +55,14 @@ class ParsedTweet():
             self.sender_name = getattr(source.author, 'name', None)
             self.sender_username = getattr(source.author, 'username', None)
             self.sender_avatar_url = getattr(source.author, 'profile_image_url_https', None)
-            if hasattr(source, 'media') and len(source.media) > 0:
-                self.media.type = source.media[0].type
-                self.media.urls = [m.media_url_https for m in source.media]
-                self.media.length = len(self.media.urls)
-                self.media.video_link = source.media[0].expanded_url if self.media.type == 'video' else None
-                self.media.items = [
-                    {
-                        'type': getattr(m, 'type', None),
-                        'url': getattr(m, 'media_url_https', None),
-                        'thumbnail_url': getattr(m, 'media_url_https', None),
-                        'formats': getattr(getattr(m, 'video_info', None), 'variants', []),
-                    }
-                    for m in source.media
-                ]
-            else:
-                self.media.type, self.media.urls, self.media.length, self.media.video_link, self.media.items = None, [], 0, None, []
-            self.media.mosaic_url = None
+            original = getattr(source, 'retweeted_tweet', None) if getattr(source, 'is_retweet', False) else source
+            original_author = getattr(original, 'author', None)
+            self.author_name = getattr(original_author, 'name', None)
+            self.author_username = getattr(original_author, 'username', None)
+            self.author_avatar_url = getattr(original_author, 'profile_image_url_https', None)
+            self._load_tweet_media(self.media, getattr(source, 'media', []) or [])
+            quoted = getattr(source, 'quoted_tweet', None)
+            self._load_tweet_media(self.quote_media, getattr(quoted, 'media', []) or [])
 
         elif isinstance(source, dict):
             tweet_data = source.get('tweet', {})
@@ -89,6 +82,11 @@ class ParsedTweet():
             self.quote.avatar_url = quote_data.get('author', {}).get('avatar_url', None)
             self.quote.trans_text = escape_markdown(quote_data.get('translation', {}).get('text', None))
 
+            author_data = tweet_data.get('author', {})
+            self.author_name = author_data.get('name', None)
+            self.author_username = author_data.get('screen_name', None)
+            self.author_avatar_url = author_data.get('avatar_url', None)
+
             # FxEmbed identifies the tracked account as reposted_by for retweets;
             # otherwise it is the ordinary tweet author. This lets webhook messages
             # preserve the identity of the account the user chose to track.
@@ -96,45 +94,13 @@ class ParsedTweet():
             self.sender_name = sender_data.get('name', None)
             self.sender_username = sender_data.get('screen_name', None)
             self.sender_avatar_url = sender_data.get('avatar_url', None)
-            
-            if tweet_data.get('reposted_by', {}):
-                author_name = tweet_data.get('author', {}).get('screen_name', None)
-                rt_info = f"RT [@{author_name}](https://twitter.com/{author_name}): "
-                self.text = rt_info + self.text
-                if self.trans_text: self.trans_text = rt_info + self.trans_text
 
-            if not media_data.get('all') and 'quote' in tweet_data:
-                media_data = tweet_data['quote'].get('media', {})
-
-            all_media = media_data.get('all', [])
-            self.media.items = all_media
-
-            if not all_media:
-                self.media.type, self.media.urls, self.media.length, self.media.mosaic_url = None, [], 0, None
-                
-                # External link preview images do not affect tweet media type, treat as sending a regular tweet
-                ex_media = media_data.get('external', None)
-                if ex_media:
-                    self.media.external_url = ex_media.get('url', None) if ex_media.get('type', None) == 'photo' else ex_media.get('thumbnail_url')
-                    
-                return
-
-            self.media.length = len(all_media)
-            # Use original URL for photos, thumbnail for videos/gifs
-            self.media.urls = [m.get('url') if m.get('type') == 'photo' else m.get('thumbnail_url', m.get('url')) for m in all_media]
-
-            type_map = {'photo': 'photo', 'video': 'video', 'gif': 'animated_gif'}
-            self.media.type = type_map.get(all_media[0].get('type'), 'photo')
-            
-            media_types = {m.get('type') for m in all_media}
-            self.is_mixed = len(media_types) > 1
-            
-            self.media.mosaic_url = media_data.get('mosaic', {}).get('type') == 'mosaic_photo' and media_data.get('mosaic', {}).get('formats', {}).get('jpeg')
-            if not self.media.mosaic_url and self.media.length > 0:
-                 self.media.mosaic_url = self.media.urls[0]
-                 
-            try: self.media.video_link = tweet_data['raw_text']['facets'][0]['replacement']
-            except: self.media.video_link = None
+            self._load_dict_media(self.media, media_data, tweet_data.get('raw_text', {}))
+            self._load_dict_media(self.quote_media, quote_data.get('media', {}), quote_data.get('raw_text', {}))
+            self.is_mixed = any(
+                len({item.get('type') for item in media.items}) > 1
+                for media in (self.media, self.quote_media)
+            )
             
         elif isinstance(source, BeautifulSoup):
             meta_image = source.find('meta', property='og:image')
@@ -172,6 +138,61 @@ class ParsedTweet():
 
         else:
             raise TypeError('source must be a Tweet, BeautifulSoup, or dict')
+
+    @property
+    def length(self) -> int:
+        """Total media count across the main post and its quoted original."""
+        return int(self.media.length or 0) + int(self.quote_media.length or 0)
+
+    @staticmethod
+    def _load_tweet_media(target, media_items) -> None:
+        if not media_items:
+            target.type, target.urls, target.length, target.video_link, target.mosaic_url, target.items = None, [], 0, None, None, []
+            return
+
+        target.type = getattr(media_items[0], 'type', None)
+        target.urls = [getattr(item, 'media_url_https', None) for item in media_items]
+        target.length = len(target.urls)
+        target.video_link = getattr(media_items[0], 'expanded_url', None) if target.type == 'video' else None
+        target.mosaic_url = None
+        target.items = [
+            {
+                'type': getattr(item, 'type', None),
+                'url': getattr(item, 'media_url_https', None),
+                'thumbnail_url': getattr(item, 'media_url_https', None),
+                'formats': getattr(getattr(item, 'video_info', None), 'variants', []),
+            }
+            for item in media_items
+        ]
+
+    @staticmethod
+    def _load_dict_media(target, media_data: dict, raw_text: dict) -> None:
+        all_media = media_data.get('all', [])
+        target.items = all_media
+        target.length = len(all_media)
+        if not all_media:
+            target.type, target.urls, target.mosaic_url, target.video_link = None, [], None, None
+            external = media_data.get('external', None)
+            if external:
+                target.external_url = external.get('url', None) if external.get('type', None) == 'photo' else external.get('thumbnail_url')
+            return
+
+        target.urls = [
+            item.get('url') if item.get('type') == 'photo' else item.get('thumbnail_url', item.get('url'))
+            for item in all_media
+        ]
+        type_map = {'photo': 'photo', 'video': 'video', 'gif': 'animated_gif'}
+        target.type = type_map.get(all_media[0].get('type'), 'photo')
+        target.mosaic_url = (
+            media_data.get('mosaic', {}).get('type') == 'mosaic_photo'
+            and media_data.get('mosaic', {}).get('formats', {}).get('jpeg')
+        )
+        if not target.mosaic_url:
+            target.mosaic_url = target.urls[0]
+        try:
+            target.video_link = raw_text['facets'][0]['replacement']
+        except (KeyError, IndexError, TypeError):
+            target.video_link = None
         
     @staticmethod
     def _wrap_quote(text: str) -> str:
