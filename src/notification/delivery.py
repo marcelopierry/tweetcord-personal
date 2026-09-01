@@ -29,6 +29,17 @@ MARKDOWN_URL_RE = re.compile(
 )
 BARE_URL_RE = re.compile(r'https?://[^\s<>\]]+', flags=re.IGNORECASE)
 X_HOSTS = {'x.com', 'twitter.com'}
+VIDEO_HOSTS = {
+    'youtube.com',
+    'youtu.be',
+    'vimeo.com',
+    'streamable.com',
+    'dailymotion.com',
+    'dai.ly',
+    'twitch.tv',
+    'tiktok.com',
+}
+VIDEO_EXTENSIONS = ('.mp4', '.webm', '.mov', '.m4v')
 
 
 @dataclass(frozen=True)
@@ -51,6 +62,17 @@ class DeliveryReferences:
     tweet_id: str
     original_id: str | None
     original_url: str | None
+    record_ids: tuple[str, ...]
+
+
+class ChannelDeliverySequencer:
+    """Provide one lock per Discord channel so multipart posts cannot interleave."""
+
+    def __init__(self):
+        self._locks: dict[int, asyncio.Lock] = {}
+
+    def lock_for(self, channel_id: int) -> asyncio.Lock:
+        return self._locks.setdefault(int(channel_id), asyncio.Lock())
 
 
 def _get(source: Any, key: str, default: Any = None) -> Any:
@@ -76,11 +98,13 @@ def build_delivery_links(
 ) -> str:
     """Build clean Discord links for ordinary, quote, and retweeted posts."""
     quote_url = original_url or (parsed_tweet.quote.url if parsed_tweet and parsed_tweet.quote else None)
+    if is_retweet:
+        if original_url:
+            return f'<{tweet_url}>\n{RETWEET_EMOJI} <{original_url}>'
+        return f'<{tweet_url}>' if tweet_url else ''
     if is_quote and quote_url:
         # The tracked account's quote post is the new content, so it comes first.
         return f'<{tweet_url}>\n{QUOTE_ORIGINAL_EMOJI} <{quote_url}>'
-    if is_retweet:
-        return f'{RETWEET_EMOJI} <{original_url or tweet_url}>'
     return f'<{tweet_url}>' if tweet_url else ''
 
 
@@ -144,6 +168,18 @@ def extract_youtube_urls(text: str) -> list[str]:
     ]
 
 
+def extract_video_urls(text: str) -> list[str]:
+    """Return links that are known video pages or direct playable video files."""
+    video_urls: list[str] = []
+    for url in extract_external_urls(text):
+        parsed = urlparse(url)
+        host = (parsed.hostname or '').lower().removeprefix('www.').removeprefix('m.')
+        is_video_host = any(host == video_host or host.endswith(f'.{video_host}') for video_host in VIDEO_HOSTS)
+        if is_video_host or parsed.path.lower().endswith(VIDEO_EXTENSIONS):
+            video_urls.append(url)
+    return video_urls
+
+
 def get_delivery_references(tweet: Any, parsed_tweet: ParsedTweet | None) -> DeliveryReferences:
     """Identify what a channel is seeing for persistent deduplication."""
     tweet_id = str(getattr(tweet, 'id', None) or getattr(tweet, 'url', ''))
@@ -157,10 +193,22 @@ def get_delivery_references(tweet: Any, parsed_tweet: ParsedTweet | None) -> Del
         original_id = match.group(1) if match else None
     original_id = str(original_id) if original_id is not None else None
 
-    # Quotes claim their own post and therefore always deliver even when their
-    # referenced original has already been seen. Retweets claim the original.
-    claim_id = original_id if getattr(tweet, 'is_retweet', False) and original_id else tweet_id
-    return DeliveryReferences(claim_id, tweet_id, original_id, original_url)
+    is_retweet = bool(getattr(tweet, 'is_retweet', False))
+    is_quote = bool(getattr(tweet, 'is_quoted', False))
+    post_key = f'post:{tweet_id}'
+    original_key = f'original:{original_id or tweet_id}'
+
+    # Namespaces distinguish a quote wrapper from an original delivered directly
+    # or by retweet. They also prevent ambiguous legacy context rows from causing
+    # new false skips after this behavior change.
+    claim_id = original_key if is_retweet or not is_quote else post_key
+    if is_retweet:
+        record_ids = tuple(dict.fromkeys((post_key, original_key)))
+    elif is_quote:
+        record_ids = (post_key,)
+    else:
+        record_ids = (original_key,)
+    return DeliveryReferences(claim_id, tweet_id, original_id, original_url, record_ids)
 
 
 def _large_avatar(url: str | None) -> str | None:
@@ -204,16 +252,38 @@ def build_tweet_embed(
     if not tweet_text:
         return None
 
-    webhook_name, avatar_url = build_webhook_identity(tracked_username, tweet, parsed_tweet)
-    display_name = webhook_name.removesuffix(f' | {WEBHOOK_SUFFIX}')
+    is_retweet = bool(getattr(tweet, 'is_retweet', False))
+    source = getattr(tweet, 'retweeted_tweet', None) if is_retweet else tweet
+    source_author = getattr(source, 'author', None)
+
+    if is_retweet:
+        display_name = (
+            getattr(parsed_tweet, 'author_name', None)
+            or getattr(source_author, 'name', None)
+            or 'Original author'
+        )
+        display_username = (
+            getattr(parsed_tweet, 'author_username', None)
+            or getattr(source_author, 'username', None)
+        )
+        avatar_url = _large_avatar(
+            getattr(parsed_tweet, 'author_avatar_url', None)
+            or getattr(source_author, 'profile_image_url_https', None)
+        )
+    else:
+        webhook_name, avatar_url = build_webhook_identity(tracked_username, tweet, parsed_tweet)
+        display_name = webhook_name.removesuffix(f' | {WEBHOOK_SUFFIX}')
+        display_username = tracked_username
+
     embed = discord.Embed(
         description=tweet_text,
         color=0x1DA1F2,
-        timestamp=getattr(tweet, 'created_on', None),
+        timestamp=getattr(source, 'created_on', None),
     )
+    author_name = f'{display_name} (@{display_username})' if display_username else display_name
     author_args: dict[str, Any] = {
-        'name': f'{display_name} (@{tracked_username})',
-        'url': f'https://x.com/{tracked_username}',
+        'name': author_name,
+        'url': f'https://x.com/{display_username or tracked_username}',
     }
     if avatar_url:
         author_args['icon_url'] = avatar_url
@@ -270,7 +340,7 @@ def _extension(url: str, fallback: str) -> str:
     return (image_format or fallback).lower()
 
 
-def media_candidates(item: Any, position: int) -> list[MediaCandidate]:
+def media_candidates(item: Any, position: int, filename_prefix: str = 'tweet') -> list[MediaCandidate]:
     """Extract direct photo/MP4 candidates from FxEmbed's media schema."""
     media_type = str(_get(item, 'type', '')).lower()
     item_url = _get(item, 'url')
@@ -284,20 +354,20 @@ def media_candidates(item: Any, position: int) -> list[MediaCandidate]:
             if url and container == 'mp4':
                 candidates.append(MediaCandidate(
                     url=url,
-                    filename=f'tweet-video-{position}.mp4',
+                    filename=f'{filename_prefix}-video-{position}.mp4',
                     size=_as_positive_int(_get(variant, 'size') or _get(item, 'filesize')),
                     bitrate=_as_positive_int(_get(variant, 'bitrate')),
                 ))
         if not candidates and item_url:
             candidates.append(MediaCandidate(
                 url=item_url,
-                filename=f'tweet-video-{position}.{_extension(item_url, "mp4")}',
+                filename=f'{filename_prefix}-video-{position}.{_extension(item_url, "mp4")}',
                 size=_as_positive_int(_get(item, 'filesize')),
             ))
     elif item_url:
         candidates.append(MediaCandidate(
             url=item_url,
-            filename=f'tweet-photo-{position}.{_extension(item_url, "jpg")}',
+            filename=f'{filename_prefix}-photo-{position}.{_extension(item_url, "jpg")}',
             size=_as_positive_int(_get(item, 'filesize')),
         ))
 
@@ -346,15 +416,21 @@ async def _download_file(session: aiohttp.ClientSession, candidate: MediaCandida
     return None
 
 
-async def prepare_media_delivery(session: aiohttp.ClientSession, parsed_tweet: ParsedTweet | None, upload_limit: int) -> MediaDelivery:
+async def prepare_media_delivery(
+    session: aiohttp.ClientSession,
+    media_source: ParsedTweet | ParsedTweet.Media | None,
+    upload_limit: int,
+    filename_prefix: str = 'tweet',
+) -> MediaDelivery:
     """Download tweet media that Discord can host and retain direct fallbacks."""
-    if not parsed_tweet or not parsed_tweet.media.items or upload_limit <= 0:
+    media = media_source.media if isinstance(media_source, ParsedTweet) else media_source
+    if not media or not media.items or upload_limit <= 0:
         return MediaDelivery(files=[], fallback_urls=[])
 
     files: list[discord.File] = []
     fallbacks: list[str] = []
-    for position, item in enumerate(parsed_tweet.media.items[:MAX_ATTACHMENTS], start=1):
-        candidates = media_candidates(item, position)
+    for position, item in enumerate(media.items[:MAX_ATTACHMENTS], start=1):
+        candidates = media_candidates(item, position, filename_prefix)
         if not candidates:
             continue
 
