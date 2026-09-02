@@ -8,7 +8,7 @@ A private, self-hosted Discord bot for forwarding posts from selected X/Twitter 
 - `/customize send-delay` changes that post-detection delay persistently and immediately reschedules every queued post.
 - Lower polling frequency by default (`tweets_check_period: 60`) to reduce scraping pressure for a personal installation.
 - Per-notifier controls for original posts, retweets, and quote posts remain available through `/add notifier` and `/customize settings`.
-- Tweet text is displayed in compact Discord embed cards while links and uploaded media remain separate. Quote tweets are ordered as the quote-post link, `🔁` plus the original link, both text cards, the quote post's media, and then the original post's media. A quote only records its own ID, so merely displaying the quoted original never suppresses a later retweet.
+- Tweet text is HTML-decoded and displayed in compact Discord embed cards while links and uploaded media remain separate. Stale upstream media facets are ignored instead of deleting valid text. Quote tweets are ordered as the quote-post link, `🔂` plus the original link, both text cards, the quote post's media, and then the original post's media. A quote only records its own ID, so merely displaying the quoted original never suppresses a later retweet.
 - Retweets show the retweeter's webhook name/avatar, then the retweet link, `🔄` plus the original link, one text card attributed to the original author, and the original media. The synthetic `RT @account:` prefix is omitted. A retweet is suppressed per channel only when that original was previously delivered directly or by another retweet.
 - Deliveries use a channel webhook when the bot has **Manage Webhooks**, so each post can display the tracked X account's name and avatar without changing the bot's global identity. The bot falls back to its normal identity if that permission is unavailable.
 - With `embed.type: built_in`, photos and videos are downloaded and uploaded as Discord attachments when they fit the channel upload limit. Uploaded videos play in Discord; oversized media falls back to a direct media URL instead of requiring the X post page.
@@ -39,6 +39,8 @@ docker compose up -d
 ```
 
 Then invite the bot with `View Channel`, `Send Messages`, `Embed Links`, `Attach Files`, `Manage Webhooks`, `Mention Everyone`, and `Use Slash Commands`. Use `/add notifier` to choose the X account, media filter, and whether retweets/quotes are enabled for that notifier. The channel is optional and defaults to the channel where the command is used.
+
+`/remove notifier` also accepts an optional channel and defaults to the channel where the command is used. Repeating `/add notifier` with exactly the same channel and settings reports that the account is already tracked; changed settings are still applied.
 
 ## Important operating cost note
 
