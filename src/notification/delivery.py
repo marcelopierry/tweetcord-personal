@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import io
 import re
 from collections.abc import Mapping
@@ -21,7 +22,7 @@ log = setup_logger(__name__)
 WEBHOOK_NAME = 'Personal TweetCord delivery'
 WEBHOOK_SUFFIX = 'Personal TweetCord'
 MAX_ATTACHMENTS = 10
-QUOTE_ORIGINAL_EMOJI = '🔁'
+QUOTE_ORIGINAL_EMOJI = '🔂'
 RETWEET_EMOJI = '🔄'
 MARKDOWN_URL_RE = re.compile(
     r'\]\((https?://(?:[^\s()]|\([^\s()]*\))+?)\)',
@@ -117,8 +118,8 @@ def build_delivery_text(tweet: Any, parsed_tweet: ParsedTweet | None) -> str:
         if parsed_text:
             return str(parsed_text).strip()
 
-    fallback = escape_markdown(str(getattr(tweet, 'text', '') or '')).strip()
-    return safe_truncate(fallback, 1200)[0] if fallback else ''
+    fallback = escape_markdown(html.unescape(str(getattr(tweet, 'text', '') or ''))).strip()
+    return safe_truncate(fallback, ParsedTweet.MAX_DESCRIPTION_LENGTH)[0] if fallback else ''
 
 
 def _clean_preview_url(url: str, *, from_markdown: bool = False) -> str:
@@ -183,18 +184,25 @@ def extract_video_urls(text: str) -> list[str]:
 def get_delivery_references(tweet: Any, parsed_tweet: ParsedTweet | None) -> DeliveryReferences:
     """Identify what a channel is seeing for persistent deduplication."""
     tweet_id = str(getattr(tweet, 'id', None) or getattr(tweet, 'url', ''))
-    source = getattr(tweet, 'retweeted_tweet', None) if getattr(tweet, 'is_retweet', False) else getattr(tweet, 'quoted_tweet', None)
+    is_retweet = bool(getattr(tweet, 'is_retweet', False))
+    is_quote = bool(getattr(tweet, 'is_quoted', False))
+    source = getattr(tweet, 'retweeted_tweet', None) if is_retweet else getattr(tweet, 'quoted_tweet', None)
     original_url = getattr(source, 'url', None)
-    if getattr(tweet, 'is_quoted', False) and not original_url and parsed_tweet:
+    if is_retweet and not original_url and parsed_tweet:
+        # Tweety notifications sometimes identify a post as a retweet without
+        # hydrating retweeted_tweet. FxTwitter still returns the canonical
+        # original URL and author alongside reposted_by, so use that source.
+        original_url = getattr(parsed_tweet, 'source_url', None)
+    if is_quote and not original_url and parsed_tweet:
         original_url = parsed_tweet.quote.url
     original_id = getattr(source, 'id', None)
+    if original_id is None and is_retweet and parsed_tweet:
+        original_id = getattr(parsed_tweet, 'source_id', None)
     if original_id is None and original_url:
         match = re.search(r'/status/(\d+)', original_url)
         original_id = match.group(1) if match else None
     original_id = str(original_id) if original_id is not None else None
 
-    is_retweet = bool(getattr(tweet, 'is_retweet', False))
-    is_quote = bool(getattr(tweet, 'is_quoted', False))
     post_key = f'post:{tweet_id}'
     original_key = f'original:{original_id or tweet_id}'
 
@@ -301,10 +309,10 @@ def build_quote_original_embed(tweet: Any, parsed_tweet: ParsedTweet | None) -> 
     quote = getattr(parsed_tweet, 'quote', None)
     quote_text = getattr(quote, 'trans_text', None) or getattr(quote, 'text', None)
     if not quote_text and source:
-        quote_text = escape_markdown(str(getattr(source, 'text', '') or ''))
+        quote_text = escape_markdown(html.unescape(str(getattr(source, 'text', '') or '')))
     if not quote_text:
         return None
-    quote_text = safe_truncate(str(quote_text).strip(), 650)[0]
+    quote_text = safe_truncate(str(quote_text).strip(), ParsedTweet.MAX_DESCRIPTION_LENGTH)[0]
 
     source_author = getattr(source, 'author', None)
     name = getattr(quote, 'name', None) or getattr(source_author, 'name', None) or 'Original tweet'
