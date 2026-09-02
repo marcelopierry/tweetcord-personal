@@ -15,7 +15,7 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
     def test_quote_delivers_quote_then_original_link(self):
         parsed = SimpleNamespace(quote=SimpleNamespace(url='https://x.com/original/status/1'))
         links = build_delivery_links('https://x.com/tracked/status/2', parsed, is_quote=True)
-        self.assertEqual(links, '<https://x.com/tracked/status/2>\n🔁 <https://x.com/original/status/1>')
+        self.assertEqual(links, '<https://x.com/tracked/status/2>\n🔂 <https://x.com/original/status/1>')
 
     def test_retweet_delivers_wrapper_then_original_link(self):
         links = build_delivery_links(
@@ -36,8 +36,8 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
         self.assertEqual(build_delivery_text(tweet, parsed), 'The tweet body')
 
     def test_delivery_text_caps_long_fallback(self):
-        tweet = SimpleNamespace(text='x' * 1600)
-        self.assertLessEqual(len(build_delivery_text(tweet, None)), 1200)
+        tweet = SimpleNamespace(text='x' * 5000)
+        self.assertLessEqual(len(build_delivery_text(tweet, None)), ParsedTweet.MAX_DESCRIPTION_LENGTH)
 
     def test_youtube_links_are_extracted_once_for_separate_previews(self):
         text = (
@@ -108,6 +108,33 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
         self.assertEqual(references.claim_id, 'original:100')
         self.assertEqual(references.tweet_id, '200')
         self.assertEqual(references.record_ids, ('post:200', 'original:100'))
+
+    def test_retweet_recovers_original_reference_from_fx_when_tweety_omits_it(self):
+        tweet = SimpleNamespace(
+            id='200',
+            url='https://x.com/retweeter/status/200',
+            is_retweet=True,
+            is_quoted=False,
+            retweeted_tweet=None,
+        )
+        parsed = SimpleNamespace(
+            source_id='100',
+            source_url='https://x.com/original/status/100',
+        )
+        references = get_delivery_references(tweet, parsed)
+        self.assertEqual(references.claim_id, 'original:100')
+        self.assertEqual(references.original_url, parsed.source_url)
+        self.assertEqual(references.record_ids, ('post:200', 'original:100'))
+        self.assertEqual(
+            build_delivery_links(
+                tweet.url,
+                parsed,
+                is_quote=False,
+                is_retweet=True,
+                original_url=references.original_url,
+            ),
+            '<https://x.com/retweeter/status/200>\n🔄 <https://x.com/original/status/100>',
+        )
 
     def test_quote_claims_its_own_id_even_when_original_was_seen(self):
         original = SimpleNamespace(id='100', url='https://x.com/original/status/100')
