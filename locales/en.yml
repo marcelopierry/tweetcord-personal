@@ -5,6 +5,7 @@ notification:
     failed: 'failed to add notifier, please try again later.'
     success_new: 'successfully added notifier for new user {username} to {account_used}!'
     success_update: 'successfully added/updated notifier for {username} (via {client_used})'
+    already_tracked: '{username} is already being tracked in {channel_mention} with those settings.'
   remove:
     success: 'successfully remove notifier of {username}!'
     not_found: "can't find notifier {username} in <#{channel_id}>!"
@@ -108,7 +109,7 @@ commands:
     notifier:
       description: 'Remove a notifier on your server.'
       params:
-        channel: 'The channel id which is set to delivers notifications.'
+        channel: 'Optional channel to remove the notifier from. Defaults to the current channel.'
         username: 'The username of the twitter user you want to turn off notifications for.'
   customize:
     description: 'Customize something'
