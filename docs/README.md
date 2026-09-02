@@ -54,7 +54,9 @@ Tweetcord is a Discord bot that leverages the [tweety-ns package](https://github
 | `media_type` | str | Whether to enable notifications that include media, or only enable notifications that include media |
 | `account_used` | str | The twitter client used by the bot to monitor the user's tweets |
 
-👉 `/remove notifier` `channel` `username`
+👉 `/remove notifier` `username` | `channel`
+
+`channel` is optional and defaults to the channel where the command is used.
 
 | Parameter | Type | Description |
 | --------- | ---- | ----------- |
@@ -98,7 +100,7 @@ Custom notification messages are in `f-string format`, currently supporting 4 sp
 - `{mention}` : the role to mention when sending to discord
 - `{url}` : the link of the tweet
 
-By default, TweetCord places the tweet text in a compact Discord embed card. The link block appears separately above the card, and uploaded media is sent in a follow-up below it. Quote tweets are ordered as the quote-post link, `🔁` plus the original link, the quote author's card, the original author's card, and finally any photos/videos. Retweets put `🔄` before the original link.
+By default, TweetCord HTML-decodes tweet text and places it in a compact Discord embed card. Stale upstream media facets are ignored instead of deleting valid text. The link block appears separately above the card, and uploaded media is sent in a follow-up below it. Quote tweets are ordered as the quote-post link, `🔂` plus the original link, the quote author's card, the original author's card, and finally any photos/videos. Retweets put `🔄` before the original link and recover the original URL from FxTwitter when Tweety does not hydrate the referenced tweet.
 
 ```plaintext
 {optional role mention}
