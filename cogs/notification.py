@@ -13,6 +13,7 @@ from src.discord_ui.fetch_tracked_channels import fetch_tracked_channels
 from src.discord_ui.modal import CustomizeSettingsModal
 from src.log import setup_logger
 from src.notification.account_tracker import AccountTracker
+from src.notification.notifier_commands import notifier_settings_unchanged, selected_interaction_channel_id
 from src.permission import ADMINISTRATOR
 from src.db_function.readonly_db import connect_readonly
 from src.utils import get_accounts, get_lock, get_utcnow, validate_and_normalize_language
@@ -21,6 +22,7 @@ from src.twitter_profile import resolve_user
 
 log = setup_logger(__name__)
 lock = get_lock()
+
 
 class Notification(Cog_Extension):
     def __init__(self, bot):
@@ -131,6 +133,32 @@ class Notification(Cog_Extension):
 
                     server_id = str(channel.guild.id)
                     roleID = str(mention.id) if mention is not None else ''
+                    existing_notifier = None
+                    if match_user is not None:
+                        await cursor.execute(
+                            'SELECT role_id, enabled, enable_type, enable_media_type '
+                            'FROM notification WHERE user_id = ? AND channel_id = ?',
+                            (match_user['id'], str(channel.id)),
+                        )
+                        existing_notifier = await cursor.fetchone()
+
+                    if (
+                        match_user is not None
+                        and match_user['enabled'] == 1
+                        and not is_changed_client
+                        and match_user['username'].casefold() == new_user.username.casefold()
+                        and notifier_settings_unchanged(existing_notifier, roleID, enable_type, media_type)
+                    ):
+                        await itn.followup.send(
+                            t(
+                                'notification.add.already_tracked',
+                                username=new_user.username,
+                                channel_mention=channel.mention,
+                            ),
+                            ephemeral=True,
+                        )
+                        return
+
                     if match_user is None:
                         async with lock:
                             await db.execute('BEGIN')
@@ -149,7 +177,15 @@ class Notification(Cog_Extension):
                                 await cursor.execute('UPDATE user SET client_used = ? WHERE id = ?', (account_used, match_user['id']))
                             
                             await cursor.execute('INSERT OR IGNORE INTO channel VALUES (?, ?)', (str(channel.id), server_id))
-                            await cursor.execute('REPLACE INTO notification (user_id, channel_id, role_id, enable_type, enable_media_type) VALUES (?, ?, ?, ?, ?)', (match_user['id'], str(channel.id), roleID, enable_type, media_type))
+                            await cursor.execute('''
+                                INSERT INTO notification (user_id, channel_id, role_id, enabled, enable_type, enable_media_type)
+                                VALUES (?, ?, ?, 1, ?, ?)
+                                ON CONFLICT(user_id, channel_id) DO UPDATE SET
+                                    role_id = excluded.role_id,
+                                    enabled = 1,
+                                    enable_type = excluded.enable_type,
+                                    enable_media_type = excluded.enable_media_type
+                            ''', (match_user['id'], str(channel.id), roleID, enable_type, media_type))
                             
                             if match_user['enabled'] == 0:
                                 await cursor.execute('UPDATE user SET enabled = 1 WHERE id = ?', (match_user['id'],))
@@ -190,18 +226,27 @@ class Notification(Cog_Extension):
         channel_id=t('commands.remove.notifier.params.channel'),
         username=t('commands.remove.notifier.params.username'),
     )
-    async def r_notifier(self, itn: discord.Interaction, channel_id: str, username: str):
+    async def r_notifier(self, itn: discord.Interaction, username: str, channel_id: str = None):
         """Remove a notifier on your server.
 
         Parameters
         -----------
         channel_id: str
-            The channel id which is set to delivers notifications.
+            The channel id which is set to deliver notifications. Defaults to
+            the channel where this command is used.
         username: str
             The username of the twitter user you want to turn off notifications for.
         """
 
         await itn.response.defer(ephemeral=True)
+
+        if channel_id is None and not isinstance(itn.channel, (discord.TextChannel, discord.Thread)):
+            await itn.followup.send('Please use this command in a server text channel or choose a channel explicitly.', ephemeral=True)
+            return
+        channel_id = selected_interaction_channel_id(itn, channel_id)
+        if channel_id is None:
+            await itn.followup.send('Unable to determine which channel notifier to remove.', ephemeral=True)
+            return
 
         async with aiosqlite.connect(os.path.join(os.getenv('DATA_PATH'), 'tracked_accounts.db')) as db:
             await db.execute('PRAGMA synchronous = OFF')
@@ -365,7 +410,7 @@ class Notification(Cog_Extension):
     @r_notifier.autocomplete('username')
     @customize_settings.autocomplete('username')
     async def get_enabled_users(self, itn: discord.Interaction, username: str) -> list[app_commands.Choice[str]]:
-        selected_channel_id = itn.data['options'][0]['options'][0]['value']
+        selected_channel_id = selected_interaction_channel_id(itn)
         if selected_channel_id is None:
             return []
 
