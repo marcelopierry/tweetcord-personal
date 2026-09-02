@@ -61,10 +61,9 @@ class TestParsedTweet(unittest.TestCase):
     def test_simplified_content_threshold(self):
         """Test that _simplified_content correctly identifies content over threshold."""
         # SIMPLIFIED_THRESHOLD is 400
-        # MAX_DESCRIPTION_LENGTH is 650
-        # To trigger truncation, we need text visible length > 650
+        # MAX_DESCRIPTION_LENGTH follows Discord's embed description limit.
         short_text = "A" * 100
-        long_text = "A" * 700
+        long_text = "A" * 4500
         
         # Short text should not be simplified
         result, is_simplified = self.parsed_tweet._simplified_content(short_text)
@@ -79,12 +78,12 @@ class TestParsedTweet(unittest.TestCase):
 
     def test_get_text_simplified(self):
         """Test get_text with simplified_content=True."""
-        long_text = "A" * 700
+        long_text = "A" * 4500
         self.parsed_tweet.text = long_text
         
         result, is_simplified = self.parsed_tweet.get_text(simplified_content=True)
         self.assertTrue(is_simplified)
-        self.assertTrue(len(result) < 700)
+        self.assertTrue(len(result) < 4500)
 
     def test_retweet_text_does_not_add_a_synthetic_rt_prefix(self):
         """Retweet cards display the original text without an RT wrapper."""
@@ -223,6 +222,72 @@ class TestParsedTweet(unittest.TestCase):
             r"Abstract [#TAG1](https://twitter.com/hashtag/TAG1) and [#TAG2](https://twitter.com/hashtag/TAG2) and [#TAG1](https://twitter.com/hashtag/TAG1)."
         )
         self.assertEqual(parsed.text, expected_text)
+
+    def test_stale_media_facet_does_not_delete_valid_note_tweet_text(self):
+        text = (
+            'First details on the weapon system for GTA 6:\n\n'
+            '• 4 weapons will be available in your inventory - including 2 long-range, 1 pistol & 1 melee\n\n'
+            '• Other weapons can be stored in your car trunk or hideout\n\n'
+            '• NPCs will immediately notice if you have your weapon drawn\n\n'
+            '• In-depth weapon customization'
+        )
+        parsed = ParsedTweet({
+            'tweet': {
+                'id': '2094901992191672488',
+                'url': 'https://x.com/DiscussingFilm/status/2094901992191672488',
+                'raw_text': {
+                    'text': text,
+                    'facets': [{
+                        'type': 'media',
+                        'indices': [278, 301],
+                        'original': 'https://t.co/jwHWeK2Xtp',
+                    }],
+                },
+                'author': {'screen_name': 'DiscussingFilm'},
+                'media': {'all': []},
+                'translation': {},
+            },
+        })
+        self.assertEqual(parsed.text, text)
+        self.assertTrue(parsed.text.endswith('weapon customization'))
+
+    def test_html_entities_are_decoded_before_url_facets(self):
+        parsed = ParsedTweet({
+            'tweet': {
+                'raw_text': {
+                    'text': 'Logic &amp; good arguments. Source: https://t.co/story',
+                    'facets': [{
+                        'type': 'url',
+                        'indices': [32, 50],
+                        'original': 'https://t.co/story',
+                        'display': 'example.com/story',
+                        'replacement': 'https://example.com/story',
+                    }],
+                },
+                'author': {'screen_name': 'example'},
+                'media': {'all': []},
+                'translation': {},
+            },
+        })
+        self.assertEqual(
+            parsed.text,
+            'Logic & good arguments. Source: [example.com/story](https://example.com/story)',
+        )
+
+    def test_fx_canonical_source_reference_is_retained_for_retweets(self):
+        parsed = ParsedTweet({
+            'tweet': {
+                'id': '100',
+                'url': 'https://x.com/original/status/100',
+                'raw_text': {'text': 'Original text'},
+                'author': {'screen_name': 'original'},
+                'reposted_by': {'screen_name': 'retweeter'},
+                'media': {'all': []},
+                'translation': {},
+            },
+        })
+        self.assertEqual(parsed.source_id, '100')
+        self.assertEqual(parsed.source_url, 'https://x.com/original/status/100')
 
 if __name__ == '__main__':
     unittest.main()
