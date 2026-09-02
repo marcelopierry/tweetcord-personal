@@ -1,3 +1,4 @@
+import html
 import re
 
 from discord.ext import commands
@@ -15,7 +16,9 @@ class Cog_Extension(commands.Cog):
 
 class ParsedTweet():
     SIMPLIFIED_THRESHOLD = 400
-    MAX_DESCRIPTION_LENGTH = 650
+    # Discord embed descriptions allow 4,096 characters. Leave a little room
+    # for Markdown syntax while retaining complete ordinary and note tweets.
+    MAX_DESCRIPTION_LENGTH = 4000
     DCOS_ICON = '\ud83d\udcd1'
     
     class Media():
@@ -47,6 +50,7 @@ class ParsedTweet():
         self.quote = self.Quote()
         self.sender_name, self.sender_username, self.sender_avatar_url = None, None, None
         self.author_name, self.author_username, self.author_avatar_url = None, None, None
+        self.source_id, self.source_url = None, None
         
         self.text, self.trans_text, self.trans_lang = None, None, None
         self.is_mixed = False
@@ -56,6 +60,8 @@ class ParsedTweet():
             self.sender_username = getattr(source.author, 'username', None)
             self.sender_avatar_url = getattr(source.author, 'profile_image_url_https', None)
             original = getattr(source, 'retweeted_tweet', None) if getattr(source, 'is_retweet', False) else source
+            self.source_id = getattr(original, 'id', None)
+            self.source_url = getattr(original, 'url', None)
             original_author = getattr(original, 'author', None)
             self.author_name = getattr(original_author, 'name', None)
             self.author_username = getattr(original_author, 'username', None)
@@ -69,9 +75,11 @@ class ParsedTweet():
             quote_data = tweet_data.get('quote', {})
             trans_data = tweet_data.get('translation', {})
             media_data = tweet_data.get('media', {})
+            self.source_id = tweet_data.get('id', None)
+            self.source_url = tweet_data.get('url', None)
             
             self.text = self._handle_raw_text(tweet_data.get('raw_text', {}))
-            self.trans_text = escape_markdown(trans_data.get('text', None))
+            self.trans_text = escape_markdown(html.unescape(str(trans_data.get('text') or '')))
             self.trans_lang = trans_data.get('source_lang', None)
             
             self.quote.text = self._handle_raw_text(quote_data.get('raw_text', {}))
@@ -80,7 +88,7 @@ class ParsedTweet():
             self.quote.url = quote_data.get('url', None)
             self.quote.profile_link = quote_data.get('author', {}).get('url', None)
             self.quote.avatar_url = quote_data.get('author', {}).get('avatar_url', None)
-            self.quote.trans_text = escape_markdown(quote_data.get('translation', {}).get('text', None))
+            self.quote.trans_text = escape_markdown(html.unescape(str(quote_data.get('translation', {}).get('text') or '')))
 
             author_data = tweet_data.get('author', {})
             self.author_name = author_data.get('name', None)
@@ -204,6 +212,10 @@ class ParsedTweet():
         facets = raw_text.get('facets', [])
         if not text:
             return None
+        # FxTwitter's raw_text may still contain HTML entities even though its
+        # clean text field does not. Twitter facet offsets are based on the
+        # decoded text, so decode before resolving them.
+        text = html.unescape(str(text))
         if not facets or not all('indices' in f for f in facets):
             return escape_markdown(text)
 
@@ -217,19 +229,43 @@ class ParsedTweet():
         last_processed_start = float('inf')
 
         for i, facet in enumerate(sorted_facets):
-            start, end = facet['indices']
+            try:
+                start, end = (int(value) for value in facet['indices'])
+            except (TypeError, ValueError):
+                continue
+
+            f_type = facet.get('type')
+            original = html.unescape(str(facet.get('original') or ''))
+
+            # FxTwitter occasionally returns display-only text together with a
+            # stale media facet whose t.co URL has already been removed. Never
+            # delete the indexed characters unless the facet's actual token is
+            # present. Finding the token also repairs UTF-16/HTML offset drift.
+            needle = original
+            if f_type == 'mention' and original and not original.startswith('@'):
+                needle = f'@{original}'
+            elif f_type == 'hashtag' and original and not original.startswith('#'):
+                needle = f'#{original}'
+
+            if needle and text[start:end] != needle:
+                positions = [match.start() for match in re.finditer(re.escape(needle), text)]
+                if not positions:
+                    continue
+                start = min(positions, key=lambda position: abs(position - start))
+                end = start + len(needle)
+
+            if start < 0 or end <= start or end > len(text):
+                continue
             if end > last_processed_start:
                 continue
-            
-            f_type = facet.get('type')
+
             if f_type not in ['url', 'media', 'mention', 'hashtag', 'bold']:
                 continue
-            
-            original = facet.get('original')
+
             facet_text = text[start:end]
             
             if f_type == 'url':
-                display = facet.get('display', original)
+                display = html.unescape(str(facet.get('display') or original))
                 replacement = facet.get('replacement', original)
                 md_link = f"[{display}]({replacement})"
             elif f_type == 'media':
