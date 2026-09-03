@@ -1,3 +1,11 @@
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-3hcX0zLg' (errno=Operation not permitted)
+2026-09-02 22:50:18.308 xcodebuild[56213:5958792]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-02 22:50:18.431 xcodebuild[56213:5958791] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-5L7FkQ65' (errno=Operation not permitted)
+2026-09-02 22:50:18.875 xcodebuild[56217:5958845]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-02 22:50:19.002 xcodebuild[56217:5958844] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
 <div align="center">
 
 <a href="./AVATAR.md"><img alt="LOGO" src="/images/md/avatar.png" width="300" height="300" /></a>
@@ -6,7 +14,7 @@
 
 ## Personal fork defaults
 
-This personal fork defaults to a 60-second poll interval and a 180-second post-detection send delay. The delay lets a later poll replace a queued tweet with its edited representation before it is sent. `/customize send-delay` persists a new global delay and retroactively reschedules queued posts. Original posts, retweets, quote tweets, photos, videos, GIF previews, and separate native previews for known video links remain supported; article links stay in the text card. Quote-post media and quoted-original media are delivered in separate ordered groups. Retweets use the retweeter's webhook identity with the original author's text card, and quote context no longer suppresses a later retweet of that original. Every multipart delivery is serialized per channel. Retweet/quote behavior is configured per `/add notifier` entry or with `/customize settings`. Grant the bot **Manage Webhooks** in each destination channel to show every delivered post under the tracked X account's name and avatar.
+This personal fork defaults to a 60-second poll interval and a 180-second post-detection send delay. Every ready post is fetched fresh before delivery: edits replace queued text/media, confirmed 404s are canceled, and temporary validation failures defer rather than send stale data. `/customize send-delay` persists a new global delay and retroactively reschedules queued posts. Original posts, retweets, quote tweets, photos, videos, GIF previews, and separate native previews for known video links remain supported; article links stay in the text card. Quote-post media and quoted-original media are delivered in separate ordered groups. Retweets use the retweeter's webhook identity with the original author's text card, and quote context no longer suppresses a later retweet of that original. Every multipart delivery is serialized per channel. Retweet/quote behavior is configured per `/add notifier` entry or with `/customize settings`. Grant the bot **Manage Webhooks** in each destination channel to show every delivered post under the tracked X account's name and avatar.
 
 A Discord Bot for Twitter Notifications
 
@@ -73,7 +81,8 @@ Tweetcord is a Discord bot that leverages the [tweety-ns package](https://github
 
 👉 `/list settings` | `account` `channel`
 
-- List every enabled X account/channel notifier together with its retweet, quote-tweet, media, role, and X-login settings. `/list users` remains as a backward-compatible alias.
+- List every enabled X account/channel notifier together with its retweet, quote-tweet, media, role, and X-login settings.
+- This replaces the old duplicate `/list users` alias, which has been removed.
 
 | Parameter | Type | Description |
 | --------- | ---- | ----------- |
@@ -174,8 +183,8 @@ Create `configs.yml` and copy the contents of `configs.example.yml` into it, and
 | `prefix` | The prefix for bot commands, only effective for prefix commands. | None, but recommended to choose a simple and easily identifiable prefix and avoid using empty strings. |
 | `activity_name` | The activity name displayed by the bot. | None. |
 | `activity_type` | The activity type displayed by the bot. | `playing`, `streaming`, `listening`, `watching` and `competing` only. |
-| `users_list_pagination_size` | `list users` command's pagination size. | Only accepts integers, and it is not recommended to use too large or too small values. |
-| `users_list_page_counter_position` | `list users` command's pagination counter position. | `title` and `footer` only. |
+| `users_list_pagination_size` | Pagination size for list commands. | Only accepts integers, and it is not recommended to use too large or too small values. |
+| `users_list_page_counter_position` | Page-counter position for list commands. | `title` and `footer` only. |
 | `enable_prefix_commands_in_guild` | Whether to enable prefix commands in the server (disabling this option only affects prefix commands and does not affect any features. You can still DM the bot to use prefix commands to upload/backup databases or download logs). If `false`, you can disable the Message Content Intent. | Boolean. |
 
 Custom activity name is in `f-string` format, currently supporting 1 special variable for use, which will be explained below.
