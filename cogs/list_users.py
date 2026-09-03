@@ -1,3 +1,11 @@
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-s6Aoyx0s' (errno=Operation not permitted)
+2026-09-02 22:49:08.779 xcodebuild[56173:5957790]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-02 22:49:08.923 xcodebuild[56173:5957789] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-AK2iQpRI' (errno=Operation not permitted)
+2026-09-02 22:49:09.360 xcodebuild[56177:5957803]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-02 22:49:09.483 xcodebuild[56177:5957802] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
 import os
 
 import aiosqlite
@@ -87,23 +95,6 @@ class ListUsers(Cog_Extension):
 
         await Pagination(itn, get_page).navegate()
 
-    @list_group.command(name='users', description=t('commands.list.users.description'))
-    @app_commands.describe(
-        account=t('commands.list.users.params.account'),
-        channel=t('commands.list.users.params.channel'),
-    )
-    async def list_users(self, itn: discord.Interaction, account: str = '', channel: str = '') -> None:
-        """Backward-compatible alias for the detailed settings list.
-
-        Parameters:
-        account: str, optional
-            The client name that you want to filter.
-        channel: str, optional
-            The channel name that you want to filter.
-        """
-
-        await self._send_settings(itn, account, channel)
-
     @list_group.command(name='settings', description='Show each tracked X account with its notification settings.')
     @app_commands.describe(account='Optional X login used for tracking', channel='Optional destination channel')
     async def list_settings(self, itn: discord.Interaction, account: str = '', channel: str = '') -> None:
@@ -142,7 +133,6 @@ class ListUsers(Cog_Extension):
 
         await Pagination(itn, get_page).navegate()
 
-    @list_users.autocomplete('account')
     @list_settings.autocomplete('account')
     async def get_clients(self, itn: discord.Interaction, account: str) -> list[app_commands.Choice[str]]:
         async with connect_readonly(os.path.join(os.getenv('DATA_PATH'), 'tracked_accounts.db')) as db:
@@ -152,7 +142,6 @@ class ListUsers(Cog_Extension):
                 client_used = list(set([row['client_used'] async for row in cursor]))
                 return [app_commands.Choice(name=row, value=row) for row in client_used if account.lower() in row.lower()]
 
-    @list_users.autocomplete('channel')
     @list_settings.autocomplete('channel')
     async def get_channel(self, itn: discord.Interaction, input_channel: str) -> list[app_commands.Choice[str]]:
         return await fetch_tracked_channels(itn, input_channel, include_unknown=True)
