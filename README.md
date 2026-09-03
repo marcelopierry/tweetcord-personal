@@ -1,11 +1,3 @@
-git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
-git: error: couldn't create cache file '/tmp/xcrun_db-ThN3YTBn' (errno=Operation not permitted)
-2026-09-02 22:50:11.354 xcodebuild[56196:5958618]  DVTFilePathFSEvents: Failed to start fs event stream.
-2026-09-02 22:50:11.478 xcodebuild[56196:5958608] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
-git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
-git: error: couldn't create cache file '/tmp/xcrun_db-2MAVaykG' (errno=Operation not permitted)
-2026-09-02 22:50:11.866 xcodebuild[56206:5958663]  DVTFilePathFSEvents: Failed to start fs event stream.
-2026-09-02 22:50:11.994 xcodebuild[56206:5958662] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
 # Personal Tweetcord
 
 A private, self-hosted Discord bot for forwarding posts from selected X/Twitter accounts into selected Discord channels. This is based on [TweetCord](https://github.com/Yuuzi261/Tweetcord) and remains MIT-licensed.
