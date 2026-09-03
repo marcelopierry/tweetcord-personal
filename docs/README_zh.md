@@ -1,11 +1,3 @@
-git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
-git: error: couldn't create cache file '/tmp/xcrun_db-Su2bO5I1' (errno=Operation not permitted)
-2026-09-02 22:50:25.310 xcodebuild[56222:5958921]  DVTFilePathFSEvents: Failed to start fs event stream.
-2026-09-02 22:50:25.436 xcodebuild[56222:5958920] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
-git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
-git: error: couldn't create cache file '/tmp/xcrun_db-4L8HXbVI' (errno=Operation not permitted)
-2026-09-02 22:50:25.854 xcodebuild[56226:5958934]  DVTFilePathFSEvents: Failed to start fs event stream.
-2026-09-02 22:50:25.978 xcodebuild[56226:5958931] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
 <div align="center">
 
 <a href="./AVATAR.md"><img alt="LOGO" src="/images/md/avatar.png" width="300" height="300" /><a>
