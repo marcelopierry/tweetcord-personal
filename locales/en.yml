@@ -1,3 +1,11 @@
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-314hSDA3' (errno=Operation not permitted)
+2026-09-02 22:50:32.483 xcodebuild[56231:5959025]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-02 22:50:32.611 xcodebuild[56231:5959024] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-EUa0SHsz' (errno=Operation not permitted)
+2026-09-02 22:50:32.993 xcodebuild[56235:5959040]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-02 22:50:33.117 xcodebuild[56235:5959039] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
 notification:
   add:
     user_not_found: 'user {username} not found'
@@ -125,10 +133,5 @@ commands:
         language: 'The language code you want to translate to (e.g. en, ja). Leave it empty to use default.'
   list:
     description: 'List something'
-    users:
-      description: 'Lists all exists notifier on your server.'
-      params:
-        account: 'The client name that you want to filter.'
-        channel: 'The channel name that you want to filter.'
   sync:
     description: 'To sync the notification of new Twitter account with database, use this command.'
