@@ -1,10 +1,18 @@
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-ThN3YTBn' (errno=Operation not permitted)
+2026-09-02 22:50:11.354 xcodebuild[56196:5958618]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-02 22:50:11.478 xcodebuild[56196:5958608] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-2MAVaykG' (errno=Operation not permitted)
+2026-09-02 22:50:11.866 xcodebuild[56206:5958663]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-02 22:50:11.994 xcodebuild[56206:5958662] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
 # Personal Tweetcord
 
 A private, self-hosted Discord bot for forwarding posts from selected X/Twitter accounts into selected Discord channels. This is based on [TweetCord](https://github.com/Yuuzi261/Tweetcord) and remains MIT-licensed.
 
 ## What is customized
 
-- Three-minute delivery delay by default (`notification_delay_seconds: 180`). A queued post is refreshed if a later poll sees a changed version before delivery.
+- Three-minute delivery delay by default (`notification_delay_seconds: 180`). Every ready post is fetched fresh before delivery, so edited text/media replaces the queued version. A 404 is rechecked once and then canceled; temporary validation failures defer the post instead of sending stale data.
 - `/customize send-delay` changes that post-detection delay persistently and immediately reschedules every queued post.
 - Lower polling frequency by default (`tweets_check_period: 60`) to reduce scraping pressure for a personal installation.
 - Per-notifier controls for original posts, retweets, and quote posts remain available through `/add notifier` and `/customize settings`.
@@ -14,9 +22,10 @@ A private, self-hosted Discord bot for forwarding posts from selected X/Twitter 
 - With `embed.type: built_in`, photos and videos are downloaded and uploaded as Discord attachments when they fit the channel upload limit. Uploaded videos play in Discord; oversized media falls back to a direct media URL instead of requiring the X post page.
 - Known video links (including YouTube, Vimeo, TikTok, Twitch, Streamable, Dailymotion, and direct video files) are sent as individual follow-ups for native previews. Article and general website links remain only in the tweet text card.
 - Deliveries are serialized per Discord channel, so one tweet's links, cards, media groups, and video previews finish before any part of the next tweet is sent there.
+- `/list accounts` shows account names, while `/list settings` shows every account/channel configuration. The duplicate legacy `/list users` alias has been removed.
 - Startup defaults to ignoring the backlog from before the bot came online (`init_latest_tweet_on_startup: true`).
 
-The delay reduces duplicate noise from quick changes, but no unauthenticated X scraper can guarantee that a deleted post is never seen or that every edit is observable.
+The final validation intentionally favors missing a post over sending content that can no longer be confirmed as current.
 
 ## Run locally for $0/month
 
