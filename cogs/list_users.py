@@ -1,11 +1,3 @@
-git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
-git: error: couldn't create cache file '/tmp/xcrun_db-s6Aoyx0s' (errno=Operation not permitted)
-2026-09-02 22:49:08.779 xcodebuild[56173:5957790]  DVTFilePathFSEvents: Failed to start fs event stream.
-2026-09-02 22:49:08.923 xcodebuild[56173:5957789] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
-git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
-git: error: couldn't create cache file '/tmp/xcrun_db-AK2iQpRI' (errno=Operation not permitted)
-2026-09-02 22:49:09.360 xcodebuild[56177:5957803]  DVTFilePathFSEvents: Failed to start fs event stream.
-2026-09-02 22:49:09.483 xcodebuild[56177:5957802] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
 import os
 
 import aiosqlite
