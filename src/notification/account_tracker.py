@@ -1,3 +1,11 @@
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-cJShcZwL' (errno=Operation not permitted)
+2026-09-02 22:50:46.277 xcodebuild[56250:5959216]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-02 22:50:46.401 xcodebuild[56250:5959215] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-egBNMPfa' (errno=Operation not permitted)
+2026-09-02 22:50:46.788 xcodebuild[56254:5959227]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-02 22:50:46.914 xcodebuild[56254:5959226] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
 import asyncio
 import os
 import sys
@@ -19,7 +27,7 @@ from src.notification.delivery import ChannelDeliverySequencer, TweetDelivery, b
 from src.notification.delivery_history import DeliveryHistory
 from src.notification.get_tweets import get_tweets
 from src.notification.delay_queue import DelayedTweetBuffer
-from src.notification.utils import is_match_media_type, is_match_type, replace_emoji, get_parsed_tweet
+from src.notification.utils import TweetRefreshError, TweetUnavailable, fetch_fresh_parsed_tweet, is_match_media_type, is_match_type, replace_emoji
 from src.utils import get_accounts, get_lock, get_utcnow
 from src.db_function.readonly_db import connect_readonly
 from src.db_function.init_db import init_latest_tweet_on_startup
@@ -27,6 +35,8 @@ from src.db_function.init_db import init_latest_tweet_on_startup
 EMBED_TYPE: str = configs['embed']['type']
 SERVICE: str = configs['embed']['proxy']['service']
 DOMAIN_NAME: str = configs['embed']['proxy']['domain_name']
+DELETION_CONFIRMATIONS = 2
+VALIDATION_RETRY_SECONDS = 60
 
 log = setup_logger(__name__)
 lock = get_lock()
@@ -38,6 +48,7 @@ class AccountTracker():
         self.db_path = os.path.join(os.getenv('DATA_PATH'), 'tracked_accounts.db')
         self.tweets = {account_name: [] for account_name in self.accounts_data.keys()}
         self.pending_tweets: dict[tuple[str, str], DelayedTweetBuffer] = {}
+        self.unavailable_checks: dict[tuple[str, str, str], int] = {}
         self.notification_delay_seconds = int(configs.get('notification_delay_seconds', 180))
         self.session = None
         self.delivery = TweetDelivery(bot)
@@ -287,6 +298,41 @@ class AccountTracker():
         except Exception as error:
             log.error(f'failed to update delivery history for channel {channel.id}: {error}')
 
+    async def _refresh_ready_tweet(
+        self,
+        pending: DelayedTweetBuffer,
+        tweet,
+        username: str,
+        client_used: str,
+    ) -> tuple[str, ParsedTweet | None]:
+        """Require a current upstream representation before a delayed send."""
+        tweet_key = str(getattr(tweet, 'id', None) or getattr(tweet, 'url', ''))
+        validation_key = (client_used, username, tweet_key)
+
+        try:
+            parsed_tweet = await fetch_fresh_parsed_tweet(tweet, self.session)
+        except TweetUnavailable:
+            confirmations = self.unavailable_checks.get(validation_key, 0) + 1
+            self.unavailable_checks[validation_key] = confirmations
+            if confirmations < DELETION_CONFIRMATIONS:
+                pending.defer(tweet, retry_seconds=VALIDATION_RETRY_SECONDS)
+                log.info(
+                    f'tweet {tweet.url} is unavailable at delivery time; '
+                    f'rechecking before cancellation'
+                )
+                return 'deferred', None
+
+            self.unavailable_checks.pop(validation_key, None)
+            log.info(f'cancelled deleted tweet before delivery: {tweet.url}')
+            return 'deleted', None
+        except TweetRefreshError as error:
+            pending.defer(tweet, retry_seconds=VALIDATION_RETRY_SECONDS)
+            log.warning(f'deferred tweet because final validation failed for {tweet.url}: {error}')
+            return 'deferred', None
+
+        self.unavailable_checks.pop(validation_key, None)
+        return 'available', parsed_tweet
+
     async def notification(self, username: str, client_used: str):
         while True:
             await asyncio.sleep(configs['tweets_check_period'])
@@ -317,6 +363,20 @@ class AccountTracker():
             # Queue the database update
             await self.db_write_queue.put((username, newest_timestamp))
 
+            validated_tweets: list[tuple[object, ParsedTweet]] = []
+            for tweet in latest_tweets:
+                status, fresh_parsed_tweet = await self._refresh_ready_tweet(
+                    pending,
+                    tweet,
+                    username,
+                    client_used,
+                )
+                if status == 'available' and fresh_parsed_tweet is not None:
+                    validated_tweets.append((tweet, fresh_parsed_tweet))
+
+            if not validated_tweets:
+                continue
+
             user = None
             notifications = []
             try:
@@ -346,7 +406,7 @@ class AccountTracker():
             if not user:
                 continue
 
-            for tweet in latest_tweets:
+            for tweet, fresh_parsed_tweet in validated_tweets:
                 log.info(f'find a new tweet from {username}')
                 
                 content_cache: dict[str, tuple[ParsedTweet | None, discord.ui.View | None]] = {}
@@ -371,7 +431,15 @@ class AccountTracker():
                         p_tweet = None
                         
                         if EMBED_TYPE == 'built_in':
-                            p_tweet = await get_parsed_tweet(tweet, self.session, lang=lang)
+                            p_tweet = fresh_parsed_tweet
+                            if lang:
+                                try:
+                                    p_tweet = await fetch_fresh_parsed_tweet(tweet, self.session, lang=lang)
+                                except (TweetUnavailable, TweetRefreshError) as error:
+                                    log.warning(
+                                        f'unable to refresh translated tweet {tweet.url}: {error}; '
+                                        f'using the validated original language'
+                                    )
                             if view is None and p_tweet.media.type == 'video' and configs['embed']['built_in']['video_link_button']:
                                 button_url = p_tweet.media.video_link or tweet.url
                                 view = gen_view(t('display.button.view_video'), button_url)
