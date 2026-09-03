@@ -1,3 +1,11 @@
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-6r462dE3' (errno=Operation not permitted)
+2026-09-02 22:50:52.917 xcodebuild[56259:5959301]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-02 22:50:53.044 xcodebuild[56259:5959300] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-y1XOHOzF' (errno=Operation not permitted)
+2026-09-02 22:50:53.456 xcodebuild[56263:5959315]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-02 22:50:53.582 xcodebuild[56263:5959314] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -47,6 +55,17 @@ class DelayedTweetBuffer:
         ready_keys = [key for key, item in self._items.items() if item.due_at <= now]
         ready = [self._items.pop(key).tweet for key in ready_keys]
         return sorted(ready, key=lambda tweet: getattr(tweet, "created_on", now))
+
+    def defer(self, tweet: Any, retry_seconds: int = 60, now: datetime | None = None) -> None:
+        """Requeue a ready tweet for a short validation retry."""
+        now = now or datetime.now(timezone.utc)
+        key = _tweet_key(tweet)
+        if not key:
+            return
+        self._items[key] = PendingTweet(
+            tweet=tweet,
+            due_at=now + timedelta(seconds=max(1, int(retry_seconds))),
+        )
 
     def set_delay_seconds(self, delay_seconds: int) -> None:
         """Apply a new delay to existing and future items retroactively."""
