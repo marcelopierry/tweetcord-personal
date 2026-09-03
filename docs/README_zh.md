@@ -1,3 +1,11 @@
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-Su2bO5I1' (errno=Operation not permitted)
+2026-09-02 22:50:25.310 xcodebuild[56222:5958921]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-02 22:50:25.436 xcodebuild[56222:5958920] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-4L8HXbVI' (errno=Operation not permitted)
+2026-09-02 22:50:25.854 xcodebuild[56226:5958934]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-02 22:50:25.978 xcodebuild[56226:5958931] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
 <div align="center">
 
 <a href="./AVATAR.md"><img alt="LOGO" src="/images/md/avatar.png" width="300" height="300" /><a>
@@ -50,16 +58,18 @@ Tweetcord是一個Discord機器人，它使用[tweety-ns](https://github.com/mah
 | `media_type` | str | 設定是否啟用包含多媒體的通知，或僅啟用包含多媒體的通知 |
 | `account_used` | str | 用來追蹤用戶推文的Twitter客戶端 |
 
-👉 `/remove notifier` `channel` `username`
+👉 `/remove notifier` `username` | `channel`
+
+`channel` 為選填；未指定時預設使用送出指令的頻道。
 
 | 參數 | 類型 | 描述 |
 |------|------|-----|
 | `channel` | str | 設置為發送通知的頻道 |
 | `username` | str | 你想要關閉通知的Twitter用戶的用戶名 |
 
-👉 `/list users` | `account` `channel`
+👉 `/list settings` | `account` `channel`
 
-- 列出所有當前伺服器開啟通知的Twitter用戶
+- 列出所有已啟用的通知及其設定
 
 | 參數 | 類型 | 描述 |
 |------|------|-----|
@@ -160,8 +170,8 @@ DATA_PATH=./data
 | `prefix` | 機器人命令的前綴，只會對前綴指令生效。 | 無，但建議選擇簡單且易於識別的前綴，並避免使用空字串。 |
 | `activity_name` | 機器人顯示的活動名稱。 | 無。 |
 | `activity_type` | 機器人顯示的活動類型。 | 僅限 `playing`、`streaming`、`listening`、`watching` 和 `competing`。 |
-| `users_list_pagination_size` | `list users` 指令的分頁大小。 | 只接受整數，不宜使用過大或過小的值。 |
-| `users_list_page_counter_position` | `list users` 指令的分頁計數器位置。 | 僅限 `title` 和 `footer` 。 |
+| `users_list_pagination_size` | 清單指令的分頁大小。 | 只接受整數，不宜使用過大或過小的值。 |
+| `users_list_page_counter_position` | 清單指令的分頁計數器位置。 | 僅限 `title` 和 `footer` 。 |
 | `enable_prefix_commands_in_guild` | 是否在伺服器啟用前綴指令（關閉這個選項僅會影響前綴指令，不影響任何功能，需要使用前綴指令上傳/備份資料庫或下載日誌可以私訊機器人），若為 `false`，則可以禁用訊息內容意圖 (Message Content Intent)。 | 布林值。 |
 
 自定義活動名稱為 `f-string` 格式，目前支援1種特別的變數可供使用，將在下面說明：
