@@ -1,3 +1,11 @@
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-nkjEQ83n' (errno=Operation not permitted)
+2026-09-02 22:51:06.638 xcodebuild[56277:5959503]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-02 22:51:06.764 xcodebuild[56277:5959501] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-4uyq0DpO' (errno=Operation not permitted)
+2026-09-02 22:51:07.151 xcodebuild[56281:5959517]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-02 22:51:07.277 xcodebuild[56281:5959516] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
 import os
 import sys
 import unittest
@@ -45,6 +53,16 @@ class TestDelayedTweetBuffer(unittest.TestCase):
         self.buffer.set_delay_seconds(180)
         self.assertEqual(self.buffer.pop_ready(self.start + timedelta(seconds=179)), [])
         self.assertEqual(self.buffer.pop_ready(self.start + timedelta(seconds=180)), [tweet])
+
+    def test_validation_retry_uses_short_defer_without_full_delay(self):
+        tweet = FakeTweet('1', self.start, 'hello')
+        self.buffer.add(tweet, self.start)
+        self.assertEqual(self.buffer.pop_ready(self.start + timedelta(seconds=300)), [tweet])
+
+        retry_at = self.start + timedelta(seconds=300)
+        self.buffer.defer(tweet, retry_seconds=60, now=retry_at)
+        self.assertEqual(self.buffer.pop_ready(retry_at + timedelta(seconds=59)), [])
+        self.assertEqual(self.buffer.pop_ready(retry_at + timedelta(seconds=60)), [tweet])
 
 
 if __name__ == '__main__':
