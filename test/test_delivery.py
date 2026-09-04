@@ -353,6 +353,7 @@ class TestTweetDeliverySend(unittest.IsolatedAsyncioTestCase):
 
         kwargs = webhook.send.await_args.kwargs
         self.assertNotIn('view', kwargs)
+        self.assertTrue(kwargs['wait'])
 
     async def test_custom_embed_remains_enabled(self):
         webhook = SimpleNamespace(send=AsyncMock())
