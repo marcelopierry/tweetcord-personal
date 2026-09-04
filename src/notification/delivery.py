@@ -500,6 +500,10 @@ class TweetDelivery:
                 'files': files,
                 'username': username,
                 'suppress_embeds': suppress_embeds,
+                # Discord accepts webhook messages asynchronously unless wait is
+                # requested. Without this confirmation a later media request can
+                # occasionally be committed before the tweet/link message.
+                'wait': True,
             }
             if view is not None:
                 kwargs['view'] = view
