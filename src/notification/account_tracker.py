@@ -21,6 +21,7 @@ from src.notification.get_tweets import get_tweets
 from src.notification.delay_queue import DelayedTweetBuffer
 from src.notification.x_validation import TweetSuperseded, validate_on_x
 from src.notification.subscriptions import ensure_subscription
+from src.notification.x_connection import XConnection
 from src.notification.utils import TweetRefreshError, TweetUnavailable, fetch_fresh_parsed_tweet, is_match_media_type, is_match_type, replace_emoji
 from src.utils import get_accounts, get_lock, get_utcnow
 from src.db_function.readonly_db import connect_readonly
@@ -46,6 +47,7 @@ class AccountTracker():
         self.notification_delay_seconds = int(configs.get('notification_delay_seconds', 180))
         self.session = None
         self.x_clients = {}
+        self.feed_checked_at = {}
         self.x_validation_lock = asyncio.Lock()
         self.delivery = TweetDelivery(bot)
         self.delivery_sequencer = ChannelDeliverySequencer()
@@ -118,6 +120,15 @@ class AccountTracker():
         for account_name, account_token in self.accounts_data.items():
             try:
                 app = await authenticate_account(account_name, account_token)
+                async def reconnect(name=account_name, token=account_token):
+                    replacement = Twitter(name)
+                    try:
+                        await replacement.load_auth_token(token)
+                    except BaseException:
+                        await replacement.request.session.aclose()
+                        raise
+                    return replacement
+                app = XConnection(app, reconnect)
                 self.x_clients[account_name] = app
                 self.bot.loop.create_task(self.tweetsUpdater(app)).set_name(f'TweetsUpdater_{account_name}')
             except Exception:
@@ -502,15 +513,17 @@ class AccountTracker():
         updater_name = asyncio.current_task().get_name().split('_', 1)[1]
         while True:
             try:
-                # Run the potentially blocking library call in a separate thread
-                self.tweets[updater_name] = await asyncio.to_thread(app.get_tweet_notifications)
+                # Tweety is async when called on this loop. Never move its shared
+                # httpx.AsyncClient into a worker thread/new event loop.
+                self.tweets[updater_name] = await asyncio.wait_for(app.get_tweet_notifications(), 60)
+                self.feed_checked_at[updater_name] = datetime.now(timezone.utc)
+                log.info(f'X feed poll completed for {updater_name}: {len(self.tweets[updater_name])} posts')
             except KeyError as e:
                 # Handle the error thrown by `tweety-ns` mentioned in issue#59
                 log.warning(f"handled KeyError in {updater_name}: {e}. This is likely a temporary API response issue from Twitter. Skipping this check.")
             except Exception as e:
-                log.error(f'{e} (task : tweets updater {updater_name})')
-                log.error(f"an unexpected error occurred, try again in {configs['tweets_updater_retry_delay']} minutes")
-                await asyncio.sleep(configs['tweets_updater_retry_delay'] * 60)
+                log.error(f'X feed poll failed for {updater_name}: {type(e).__name__}; retrying in 60 seconds')
+                await asyncio.sleep(60)
                 continue
             
             await asyncio.sleep(configs['tweets_check_period'])
@@ -542,6 +555,9 @@ class AccountTracker():
                             log.info(f'restart {dead_task_username} successfully using {client_used}')
 
             for client in self.accounts_data.keys():
+                last_poll = self.feed_checked_at.get(client)
+                if last_poll is None or (datetime.now(timezone.utc) - last_poll).total_seconds() > 180:
+                    log.error(f'X feed {client} has no successful poll within three minutes')
                 if f'TweetsUpdater_{client}' not in running_tasks:
                     log.warning(f'tweets updater {client} : dead')
 
