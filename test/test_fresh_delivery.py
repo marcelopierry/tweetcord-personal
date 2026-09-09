@@ -1,8 +1,9 @@
 import os
+import asyncio
 import sys
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, AsyncMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -47,6 +48,17 @@ def tweet_payload(text='edited text'):
 
 
 class TestFreshTweetFetch(unittest.IsolatedAsyncioTestCase):
+    def make_tracker(self):
+        tracker = AccountTracker.__new__(AccountTracker)
+        tracker.x_validation_lock = asyncio.Lock()
+        tracker.x_clients = {'client': SimpleNamespace(request=SimpleNamespace(
+            get_tweet_detail=AsyncMock(return_value={'entryId': 'tweet-100', 'content': {
+                'itemContent': {'tweet_results': {'result': {
+                    'rest_id': '100', 'edit_control': {'edit_tweet_ids': ['100']},
+                }}}}}),
+        ))}
+        return tracker
+
     def setUp(self):
         self.tweet = SimpleNamespace(
             id='100',
@@ -60,6 +72,34 @@ class TestFreshTweetFetch(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(parsed.text, 'edited version')
 
+    async def test_superseded_version_never_reaches_media_proxy(self):
+        tracker = self.make_tracker()
+        tracker.unavailable_checks = {}
+        tracker.session = FakeSession()  # Any proxy lookup would fail this test.
+        tracker.x_clients['client'].request.get_tweet_detail.return_value = {
+            'entryId': 'tweet-100', 'content': {'itemContent': {'tweet_results': {
+                'result': {'rest_id': '100', 'edit_control': {'edit_tweet_ids': ['100', '101']}}
+            }}}
+        }
+        pending = SimpleNamespace(defer=Mock())
+        status, parsed = await tracker._refresh_ready_tweet(pending, self.tweet, 'example', 'client')
+        self.assertEqual(status, 'superseded')
+        self.assertIsNone(parsed)
+        pending.defer.assert_not_called()
+
+    async def test_deleted_on_x_never_uses_cached_live_proxy(self):
+        tracker = self.make_tracker()
+        tracker.unavailable_checks = {}
+        tracker.session = FakeSession(FakeResponse(200, tweet_payload()))
+        tracker.x_clients['client'].request.get_tweet_detail.return_value = {
+            'entryId': 'tweet-100', 'content': {'itemContent': {'tweet_results': {}}}
+        }
+        pending = SimpleNamespace(defer=Mock())
+        first, _ = await tracker._refresh_ready_tweet(pending, self.tweet, 'example', 'client')
+        second, _ = await tracker._refresh_ready_tweet(pending, self.tweet, 'example', 'client')
+        self.assertEqual((first, second), ('deferred', 'deleted'))
+        self.assertEqual(len(tracker.session.responses), 1)
+
     async def test_deleted_tweet_raises_unavailable_without_stale_fallback(self):
         with self.assertRaises(TweetUnavailable):
             await fetch_fresh_parsed_tweet(
@@ -68,7 +108,7 @@ class TestFreshTweetFetch(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_two_unavailable_checks_cancel_instead_of_deliver(self):
-        tracker = AccountTracker.__new__(AccountTracker)
+        tracker = self.make_tracker()
         tracker.session = FakeSession(FakeResponse(404), FakeResponse(404))
         tracker.unavailable_checks = {}
         pending = SimpleNamespace(defer=Mock())
@@ -86,7 +126,7 @@ class TestFreshTweetFetch(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tracker.unavailable_checks, {})
 
     async def test_temporary_refresh_failure_defers_without_marking_deleted(self):
-        tracker = AccountTracker.__new__(AccountTracker)
+        tracker = self.make_tracker()
         tracker.session = FakeSession(FakeResponse(503))
         tracker.unavailable_checks = {}
         pending = SimpleNamespace(defer=Mock())
