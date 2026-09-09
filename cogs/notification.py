@@ -19,6 +19,7 @@ from src.db_function.readonly_db import connect_readonly
 from src.utils import get_accounts, get_lock, get_utcnow, validate_and_normalize_language
 from src.presence_updater import update_presence
 from src.twitter_profile import resolve_user
+from src.notification.subscriptions import ensure_subscription
 
 log = setup_logger(__name__)
 lock = get_lock()
@@ -125,11 +126,9 @@ class Notification(Cog_Extension):
                             await itn.followup.send(t('notification.add.client_conflict', username=new_user.username, account_used=account_used), ephemeral=True)
                             return
 
-                    should_activate = match_user is None or match_user['enabled'] == 0 or is_changed_client
-                    if should_activate:
-                        await app.follow_user(new_user.id)
-                        await app.enable_user_notification(new_user.id)
-                        log.info(f'successfully turned on notification for {new_user.username}')
+                    subscription_repaired = await ensure_subscription(app, new_user.id)
+                    if subscription_repaired:
+                        log.info(f'verified repaired X subscription for {new_user.username}')
 
                     server_id = str(channel.guild.id)
                     roleID = str(mention.id) if mention is not None else ''
@@ -149,6 +148,13 @@ class Notification(Cog_Extension):
                         and match_user['username'].casefold() == new_user.username.casefold()
                         and notifier_settings_unchanged(existing_notifier, roleID, enable_type, media_type)
                     ):
+                        if subscription_repaired:
+                            await itn.followup.send(
+                                f'@{new_user.username} is already tracked in {channel.mention}. '
+                                'Its X subscription was out of sync and has now been repaired.',
+                                ephemeral=True,
+                            )
+                            return
                         await itn.followup.send(
                             t(
                                 'notification.add.already_tracked',
