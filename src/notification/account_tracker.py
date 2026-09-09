@@ -20,6 +20,7 @@ from src.notification.delivery_history import DeliveryHistory
 from src.notification.get_tweets import get_tweets
 from src.notification.delay_queue import DelayedTweetBuffer
 from src.notification.x_validation import TweetSuperseded, validate_on_x
+from src.notification.subscriptions import ensure_subscription
 from src.notification.utils import TweetRefreshError, TweetUnavailable, fetch_fresh_parsed_tweet, is_match_media_type, is_match_type, replace_emoji
 from src.utils import get_accounts, get_lock, get_utcnow
 from src.db_function.readonly_db import connect_readonly
@@ -127,6 +128,36 @@ class AccountTracker():
             self.bot.loop.create_task(self.notification(username, client_used)).set_name(username)
         
         self.bot.loop.create_task(self.tasksMonitor()).set_name('TasksMonitor')
+        self.bot.loop.create_task(self.subscriptionMonitor()).set_name('SubscriptionMonitor')
+
+    async def subscriptionMonitor(self):
+        """Reconcile active subscriptions at startup and every thirty minutes."""
+        while True:
+            checked = repaired = failed = 0
+            try:
+                async with connect_readonly(self.db_path) as db:
+                    rows = await (await db.execute(
+                        'SELECT id, username, client_used FROM user WHERE enabled = 1 '
+                        'AND EXISTS (SELECT 1 FROM notification n WHERE n.user_id = user.id AND n.enabled = 1)'
+                    )).fetchall()
+                for user_id, username, account in rows:
+                    try:
+                        # Recheck membership so removals during the sweep stay removed.
+                        if (username, account) not in self.latest_tweet_timestamps:
+                            continue
+                        changed = await ensure_subscription(self.x_clients[account], user_id)
+                        checked += 1
+                        if changed:
+                            repaired += 1
+                            log.warning(f'repaired X subscription drift for {username} via {account}')
+                    except Exception as error:
+                        failed += 1
+                        log.error(f'X subscription verification failed for {username}: {type(error).__name__}')
+                    await asyncio.sleep(2)
+                log.info(f'X subscription audit: verified={checked}, repaired={repaired}, failed={failed}')
+            except Exception as error:
+                log.error(f'X subscription audit failed: {type(error).__name__}')
+            await asyncio.sleep(1800)
 
     async def timestamp_updater(self):
         """Periodically reads all user timestamps from the DB into a shared dictionary."""
