@@ -19,6 +19,7 @@ from src.notification.delivery import ChannelDeliverySequencer, TweetDelivery, b
 from src.notification.delivery_history import DeliveryHistory
 from src.notification.get_tweets import get_tweets
 from src.notification.delay_queue import DelayedTweetBuffer
+from src.notification.x_validation import TweetSuperseded, validate_on_x
 from src.notification.utils import TweetRefreshError, TweetUnavailable, fetch_fresh_parsed_tweet, is_match_media_type, is_match_type, replace_emoji
 from src.utils import get_accounts, get_lock, get_utcnow
 from src.db_function.readonly_db import connect_readonly
@@ -43,6 +44,8 @@ class AccountTracker():
         self.unavailable_checks: dict[tuple[str, str, str], int] = {}
         self.notification_delay_seconds = int(configs.get('notification_delay_seconds', 180))
         self.session = None
+        self.x_clients = {}
+        self.x_validation_lock = asyncio.Lock()
         self.delivery = TweetDelivery(bot)
         self.delivery_sequencer = ChannelDeliverySequencer()
         self.delivery_history = DeliveryHistory(self.db_path)
@@ -114,6 +117,7 @@ class AccountTracker():
         for account_name, account_token in self.accounts_data.items():
             try:
                 app = await authenticate_account(account_name, account_token)
+                self.x_clients[account_name] = app
                 self.bot.loop.create_task(self.tweetsUpdater(app)).set_name(f'TweetsUpdater_{account_name}')
             except Exception:
                 sys.exit(1)
@@ -302,7 +306,13 @@ class AccountTracker():
         validation_key = (client_used, username, tweet_key)
 
         try:
+            async with self.x_validation_lock:
+                await validate_on_x(self.x_clients[client_used], tweet_key)
             parsed_tweet = await fetch_fresh_parsed_tweet(tweet, self.session)
+        except TweetSuperseded as error:
+            self.unavailable_checks.pop(validation_key, None)
+            log.info(f'cancelled superseded tweet before delivery: {error}')
+            return 'superseded', None
         except TweetUnavailable:
             confirmations = self.unavailable_checks.get(validation_key, 0) + 1
             self.unavailable_checks[validation_key] = confirmations
