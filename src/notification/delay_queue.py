@@ -69,3 +69,7 @@ class DelayedTweetBuffer:
 
     def __len__(self) -> int:
         return len(self._items)
+
+    def tweets(self) -> list[Any]:
+        """Snapshot queued posts, including those not due yet."""
+        return [item.tweet for item in self._items.values()]
