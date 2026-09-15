@@ -18,6 +18,7 @@ from src.notification.display_tools import get_action
 from src.notification.delivery import ChannelDeliverySequencer, TweetDelivery, build_delivery_links, build_delivery_text, build_quote_original_embed, build_tweet_embed, build_webhook_identity, extract_video_urls, get_delivery_references, prepare_media_delivery
 from src.notification.delivery_history import DeliveryHistory
 from src.notification.get_tweets import get_tweets
+from src.notification.date_comparator import date_comparator
 from src.notification.delay_queue import DelayedTweetBuffer
 from src.notification.x_validation import TweetSuperseded, validate_on_x
 from src.notification.subscriptions import ensure_subscription
@@ -43,6 +44,7 @@ class AccountTracker():
         self.db_path = os.path.join(os.getenv('DATA_PATH'), 'tracked_accounts.db')
         self.tweets = {account_name: [] for account_name in self.accounts_data.keys()}
         self.pending_tweets: dict[tuple[str, str], DelayedTweetBuffer] = {}
+        self.ready_tweets = {}
         self.unavailable_checks: dict[tuple[str, str, str], int] = {}
         self.notification_delay_seconds = int(configs.get('notification_delay_seconds', 180))
         self.session = None
@@ -377,8 +379,32 @@ class AccountTracker():
         self.unavailable_checks.pop(validation_key, None)
         return 'available', parsed_tweet
 
+    async def queued_original_for_channel(self, tweet, parsed_tweet, channel_id):
+        if not getattr(tweet, 'is_retweet', False):
+            return False
+        original_id = get_delivery_references(tweet, parsed_tweet).original_id
+        if not original_id:
+            return False
+        pools = [buffer.tweets() for buffer in self.pending_tweets.values()]
+        pools.extend(self.ready_tweets.values())
+        for candidate in (candidate for pool in pools for candidate in pool):
+            if getattr(candidate, 'is_retweet', False) or str(getattr(candidate, 'id', '')) != original_id:
+                continue
+            async with connect_readonly(self.db_path) as db:
+                rows = await (await db.execute(
+                    'SELECT n.enable_type, n.enable_media_type FROM notification n '
+                    'JOIN user u ON u.id=n.user_id WHERE u.id=? AND u.enabled=1 '
+                    'AND n.channel_id=? AND n.enabled=1',
+                    (str(candidate.author.id), str(channel_id)),
+                )).fetchall()
+            media_source = parsed_tweet if parsed_tweet is not None else candidate
+            if any(is_match_type(candidate, row[0]) and is_match_media_type(media_source, row[1]) for row in rows):
+                return True
+        return False
+
     async def notification(self, username: str, client_used: str):
         while True:
+            self.ready_tweets[(client_used, username)] = []
             await asyncio.sleep(configs['tweets_check_period'])
 
             last_tweet_at = self.latest_tweet_timestamps.get((username, client_used))
@@ -398,14 +424,15 @@ class AccountTracker():
                     pending.add(tweet, now)
 
             latest_tweets = pending.pop_ready()
+            self.ready_tweets[(client_used, username)] = latest_tweets
             if not latest_tweets:
                 continue
             
             newest_timestamp = max(tweet.created_on for tweet in latest_tweets)
             # Update local cache immediately to prevent re-notification
-            self.latest_tweet_timestamps[(username, client_used)] = str(newest_timestamp)
-            # Queue the database update
-            await self.db_write_queue.put((username, newest_timestamp))
+            if date_comparator(newest_timestamp, last_tweet_at) == 1:
+                self.latest_tweet_timestamps[(username, client_used)] = str(newest_timestamp)
+                await self.db_write_queue.put((username, newest_timestamp))
 
             validated_tweets: list[tuple[object, ParsedTweet]] = []
             for tweet in latest_tweets:
@@ -418,6 +445,7 @@ class AccountTracker():
                 if status == 'available' and fresh_parsed_tweet is not None:
                     validated_tweets.append((tweet, fresh_parsed_tweet))
 
+            self.ready_tweets[(client_used, username)] = [tweet for tweet, _ in validated_tweets]
             if not validated_tweets:
                 continue
 
@@ -499,6 +527,10 @@ class AccountTracker():
                     # same moment. Hold the channel lock until links, cards, both
                     # media groups, previews, and history are all complete.
                     async with self.delivery_sequencer.lock_for(channel.id):
+                        if await self.queued_original_for_channel(tweet, current_p_tweet, channel.id):
+                            pending.defer(tweet, retry_seconds=60)
+                            log.info(f'deferred retweet {tweet.id} in channel {channel.id}: queued original has priority')
+                            continue
                         await self._deliver_tweet_to_channel(
                             username,
                             tweet,
@@ -590,6 +622,8 @@ class AccountTracker():
         # Remove from cache so the monitor doesn't restart it
         if key_to_remove and key_to_remove in self.latest_tweet_timestamps:
             del self.latest_tweet_timestamps[key_to_remove]
+            self.pending_tweets.pop((key_to_remove[1], username), None)
+            self.ready_tweets.pop((key_to_remove[1], username), None)
 
         # Cancel the running task
         for task in asyncio.all_tasks():
