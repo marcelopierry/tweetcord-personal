@@ -51,6 +51,8 @@ class ParsedTweet():
         self.sender_name, self.sender_username, self.sender_avatar_url = None, None, None
         self.author_name, self.author_username, self.author_avatar_url = None, None, None
         self.source_id, self.source_url = None, None
+        self.source_created_at = None
+        self.quote.created_at = None
         
         self.text, self.trans_text, self.trans_lang = None, None, None
         self.is_mixed = False
@@ -62,12 +64,14 @@ class ParsedTweet():
             original = getattr(source, 'retweeted_tweet', None) if getattr(source, 'is_retweet', False) else source
             self.source_id = getattr(original, 'id', None)
             self.source_url = getattr(original, 'url', None)
+            self.source_created_at = getattr(original, 'created_on', None)
             original_author = getattr(original, 'author', None)
             self.author_name = getattr(original_author, 'name', None)
             self.author_username = getattr(original_author, 'username', None)
             self.author_avatar_url = getattr(original_author, 'profile_image_url_https', None)
             self._load_tweet_media(self.media, getattr(source, 'media', []) or [])
             quoted = getattr(source, 'quoted_tweet', None)
+            self.quote.created_at = getattr(quoted, 'created_on', None)
             self._load_tweet_media(self.quote_media, getattr(quoted, 'media', []) or [])
 
         elif isinstance(source, dict):
@@ -77,6 +81,8 @@ class ParsedTweet():
             media_data = tweet_data.get('media', {})
             self.source_id = tweet_data.get('id', None)
             self.source_url = tweet_data.get('url', None)
+            self.source_created_at = tweet_data.get('created_timestamp') or tweet_data.get('created_at')
+            self.quote.created_at = quote_data.get('created_timestamp') or quote_data.get('created_at')
             
             self.text = self._handle_raw_text(tweet_data.get('raw_text', {}))
             self.trans_text = escape_markdown(html.unescape(str(trans_data.get('text') or '')))
