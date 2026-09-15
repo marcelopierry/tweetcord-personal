@@ -214,7 +214,7 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
         self.assertEqual(embed.description, 'Tweet body in a box')
         self.assertEqual(embed.author.name, 'Bobby Skinner (@BobbySkinner_)')
         self.assertEqual(embed.author.icon_url, 'https://pbs.twimg.com/profile_images/example_400x400.jpg')
-        self.assertEqual(embed.footer.text, 'Personal TweetCord')
+        self.assertIsNone(embed.footer.text)
         self.assertIsNone(embed.image.url)
 
     def test_retweet_card_uses_original_author_while_webhook_uses_retweeter(self):
