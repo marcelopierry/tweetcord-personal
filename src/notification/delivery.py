@@ -4,6 +4,8 @@ import asyncio
 import html
 import io
 import re
+from datetime import datetime, timezone
+from dateutil.parser import parse as parse_datetime
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -250,6 +252,31 @@ def build_webhook_identity(tracked_username: str, tweet: Any, parsed_tweet: Pars
     return f'{name}{suffix}'[:80], _large_avatar(avatar)
 
 
+def post_timestamp(value=None, source=None, post_id=None, url=None):
+    """Use the displayed post's time, never a repost wrapper's timestamp."""
+    for candidate in (value, getattr(source, 'created_on', None)):
+        try:
+            if isinstance(candidate, datetime):
+                return candidate.replace(tzinfo=timezone.utc) if candidate.tzinfo is None else candidate
+            if isinstance(candidate, (int, float)) and candidate > 0:
+                return datetime.fromtimestamp(candidate, timezone.utc)
+            if isinstance(candidate, str) and candidate:
+                parsed = parse_datetime(candidate)
+                return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+        except (ValueError, TypeError, OverflowError, OSError):
+            pass
+    post_id = post_id or getattr(source, 'id', None)
+    if not post_id and url:
+        match = re.search(r'/status/(\d+)', url)
+        post_id = match.group(1) if match else None
+    try:
+        if int(post_id) >= (1 << 22):
+            return datetime.fromtimestamp(((int(post_id) >> 22) + 1288834974657) / 1000, timezone.utc)
+    except (ValueError, TypeError, OverflowError, OSError):
+        pass
+    return None
+
+
 def build_tweet_embed(
     tracked_username: str,
     tweet: Any,
@@ -286,7 +313,8 @@ def build_tweet_embed(
     embed = discord.Embed(
         description=tweet_text,
         color=0x1DA1F2,
-        timestamp=getattr(source, 'created_on', None),
+        timestamp=post_timestamp(getattr(parsed_tweet, 'source_created_at', None), source,
+                                 getattr(parsed_tweet, 'source_id', None), getattr(parsed_tweet, 'source_url', None)),
     )
     author_name = f'{display_name} (@{display_username})' if display_username else display_name
     author_args: dict[str, Any] = {
@@ -296,7 +324,6 @@ def build_tweet_embed(
     if avatar_url:
         author_args['icon_url'] = avatar_url
     embed.set_author(**author_args)
-    embed.set_footer(text=WEBHOOK_SUFFIX)
     return embed
 
 
@@ -326,7 +353,7 @@ def build_quote_original_embed(tweet: Any, parsed_tweet: ParsedTweet | None) -> 
     embed = discord.Embed(
         description=quote_text,
         color=0xAAB8C2,
-        timestamp=getattr(source, 'created_on', None),
+        timestamp=post_timestamp(getattr(quote, 'created_at', None), source, url=source_url),
     )
     author_name = f'{name} (@{username})' if username else name
     author_args: dict[str, Any] = {'name': author_name}
@@ -335,7 +362,6 @@ def build_quote_original_embed(tweet: Any, parsed_tweet: ParsedTweet | None) -> 
     if avatar_url:
         author_args['icon_url'] = avatar_url
     embed.set_author(**author_args)
-    embed.set_footer(text=WEBHOOK_SUFFIX)
     return embed
 
 
