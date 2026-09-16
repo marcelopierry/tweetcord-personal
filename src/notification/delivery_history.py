@@ -16,11 +16,18 @@ class DeliveryHistory:
 
     async def claim(self, channel_id: str | int, tweet_id: str | int) -> bool:
         """Atomically reserve a tweet ID; false means that channel saw it already."""
+        key = str(tweet_id)
+        # Both namespaces identify a post actually delivered, never merely
+        # quoted context. Recognize existing quote history without a migration.
+        prefix, separator, post_id = key.partition(':')
+        alias = ('post:' if prefix == 'original' else 'original:') + post_id if separator and prefix in ('post', 'original') else key
         async with lock:
             async with aiosqlite.connect(self.db_path, timeout=10) as db:
                 cursor = await db.execute(
-                    'INSERT OR IGNORE INTO delivered_tweet (channel_id, tweet_id, delivered_at) VALUES (?, ?, ?)',
-                    (str(channel_id), str(tweet_id), get_utcnow()),
+                    'INSERT OR IGNORE INTO delivered_tweet (channel_id, tweet_id, delivered_at) '
+                    'SELECT ?, ?, ? WHERE NOT EXISTS ('
+                    'SELECT 1 FROM delivered_tweet WHERE channel_id=? AND tweet_id IN (?, ?))',
+                    (str(channel_id), key, get_utcnow(), str(channel_id), key, alias),
                 )
                 await db.commit()
                 return cursor.rowcount == 1
