@@ -537,12 +537,30 @@ class TweetDelivery:
                 kwargs['avatar_url'] = avatar_url
             if isinstance(channel, discord.Thread):
                 kwargs['thread'] = channel
-            try:
-                await webhook.send(**kwargs)
-                return
-            except (discord.Forbidden, discord.HTTPException) as error:
-                self._webhooks.pop(getattr(self._webhook_channel(channel), 'id', None), None)
-                log.warning(f'webhook delivery failed; falling back to the bot account: {error}')
+            retry_delay = 5
+            while True:
+                try:
+                    await webhook.send(**kwargs)
+                    return
+                except (discord.Forbidden, discord.HTTPException) as error:
+                    if error.status == 429:
+                        # A rejected rate-limited send is safe to retry. Keep the
+                        # identity and channel sequencing lock; never bypass the
+                        # webhook limit by sending as the default bot instead.
+                        try:
+                            retry_after = float(error.response.headers.get('Retry-After', 0))
+                        except (AttributeError, TypeError, ValueError):
+                            retry_after = 0
+                        delay = max(retry_delay, retry_after)
+                        log.warning(f'webhook rate limited in channel {channel.id}; preserving identity and retrying in {delay}s')
+                        await asyncio.sleep(delay)
+                        retry_delay = min(retry_delay * 2, 60)
+                        for file in files:
+                            file.reset()
+                        continue
+                    self._webhooks.pop(getattr(self._webhook_channel(channel), 'id', None), None)
+                    log.warning(f'webhook delivery failed; falling back to the bot account: {error}')
+                    break
 
         for file in files:
             file.reset()
