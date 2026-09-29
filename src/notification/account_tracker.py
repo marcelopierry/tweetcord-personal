@@ -19,6 +19,7 @@ from src.notification.delivery import ChannelDeliverySequencer, TweetDelivery, b
 from src.notification.delivery_history import DeliveryHistory
 from src.notification.get_tweets import get_tweets
 from src.notification.date_comparator import date_comparator
+from src.notification.x_bootstrap import prepare_x_bootstrap
 from src.notification.delay_queue import DelayedTweetBuffer
 from src.notification.x_validation import TweetSuperseded, validate_on_x
 from src.notification.subscriptions import ensure_subscription
@@ -105,7 +106,7 @@ class AccountTracker():
         await self.timestamps_ready.wait()
 
         async def authenticate_account(account_name, account_token):
-            app = Twitter(account_name)
+            app = prepare_x_bootstrap(Twitter(account_name))
             max_attempts = configs['auth_max_attempts']
             for attempt in range(max_attempts):
                 try:
@@ -123,7 +124,7 @@ class AccountTracker():
             try:
                 app = await authenticate_account(account_name, account_token)
                 async def reconnect(name=account_name, token=account_token):
-                    replacement = Twitter(name)
+                    replacement = prepare_x_bootstrap(Twitter(name))
                     try:
                         await replacement.load_auth_token(token)
                     except BaseException:
