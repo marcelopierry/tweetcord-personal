@@ -17,6 +17,7 @@ from src.log import setup_logger
 from src.notification.display_tools import get_action
 from src.notification.delivery import ChannelDeliverySequencer, TweetDelivery, build_delivery_links, build_delivery_text, build_quote_original_embed, build_tweet_embed, build_webhook_identity, extract_video_urls, get_delivery_references, prepare_media_delivery
 from src.notification.delivery_history import DeliveryHistory
+from src.notification.channel_filter import GIANTS_CHANNEL_FILTER
 from src.notification.get_tweets import get_tweets
 from src.notification.date_comparator import date_comparator
 from src.notification.x_bootstrap import prepare_x_bootstrap
@@ -218,6 +219,10 @@ class AccountTracker():
         lang: str | None,
     ) -> None:
         """Send every component of one tweet while holding its channel lock."""
+        blocked_term = GIANTS_CHANNEL_FILTER.blocked_reason(channel.id, username, tweet, parsed_tweet)
+        if blocked_term:
+            log.info(f'filtered tweet {tweet.id} in channel {channel.id}: matched {blocked_term!r}')
+            return
         references = get_delivery_references(tweet, parsed_tweet)
         claim_id = references.claim_id
         if not await self.delivery_history.claim(channel.id, claim_id):
@@ -390,6 +395,10 @@ class AccountTracker():
         pools.extend(self.ready_tweets.values())
         for candidate in (candidate for pool in pools for candidate in pool):
             if getattr(candidate, 'is_retweet', False) or str(getattr(candidate, 'id', '')) != original_id:
+                continue
+            if GIANTS_CHANNEL_FILTER.blocked_reason(
+                channel_id, getattr(candidate.author, 'username', ''), candidate,
+            ):
                 continue
             async with connect_readonly(self.db_path) as db:
                 rows = await (await db.execute(
