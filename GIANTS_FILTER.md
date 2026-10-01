@@ -7,8 +7,14 @@ Other channels and their delivery history are unaffected.
 Before claiming delivery history or sending links/cards/media, the bot checks the
 fresh, validated tweet text and its quoted original. Retweets use the original
 text. Any allowed Giants term wins over every blocked term, regardless of order.
-Otherwise, the seven requested team names, their roster players' full names,
-first names, surnames, and configured nicknames block the entire post.
+Otherwise, the seven requested team names and their roster players' full names
+block the entire post. Bare first names never block. Surnames and configured
+nicknames only block alongside clear context for that player's sport: for
+example, "Judge hit a homer" or "Cole pitched six innings", but not "Aaron
+made a great throw", "Rice is back", or "OG is back". Generic baseball context
+without a recognized player surname/nickname is allowed.
+Football terms such as football, quarterback, touchdown, wide receiver and QB
+also override every block, including explicit team names and full player names.
 Matching ignores case/accents and uses whole words/phrases, including hashtags.
 URL targets are excluded; visible link labels are included.
 
@@ -18,9 +24,8 @@ The MLB lists include the 40-man roster. Nicknames are an explicit alias list;
 new nicknames, trades and roster additions require updating this file and
 restarting the service. No runtime roster lookup or paid API is needed.
 
-First names are intentionally broad: for example, an unrelated mention of Aaron
-can be filtered unless a Giants allow term appears. Shared names obey the same
-allow-first rule. Allowed terms cover Giants/NYG/NFL, Harbaugh and key Giants
+The filter deliberately favors letting uncertain posts through. Allowed terms
+cover Giants/NYG/NFL, general football context, Harbaugh and key Giants
 players, including Dart, Nabers, Carter, Burns, Thibodeaux and Skattebo.
 
 Filtered posts are logged with the matched term, but are not marked delivered.
