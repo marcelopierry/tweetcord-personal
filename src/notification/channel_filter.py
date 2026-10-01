@@ -26,12 +26,18 @@ def compile_terms(terms):
 def player_terms(players):
     for name in players:
         yield name
-        parts = re.sub(r'\s+(?:Jr\.?|Sr\.?|II|III|IV)$', '', name).split()
-        if len(parts) >= 2:
-            yield parts[0]  # Deliberately include common first names, as requested.
-            yield parts[0].split('-')[0]
-            yield ' '.join(parts[1:])
-            yield parts[-1]
+        # A full player name remains specific even without Jr./II/III.
+        yield re.sub(r'\s+(?:Jr\.?|Sr\.?|II|III|IV)$', '', name)
+
+
+SPORT_CONTEXT = {
+    'baseball': ['baseball', 'MLB', 'home run', 'home runs', 'homer', 'homers',
+                 'homered', 'bullpen', 'inning', 'innings', 'pitcher', 'pitchers',
+                 'strikeout', 'strikeouts', 'batting', 'at bat', 'at bats', 'RBI'],
+    'basketball': ['basketball', 'NBA', 'three pointer', 'three pointers',
+                   'three point', 'dunk', 'dunks', 'dunked', 'free throw', 'free throws'],
+    'hockey': ['hockey', 'NHL', 'puck', 'goalie', 'goalies', 'power play', 'slapshot'],
+}
 
 
 class ChannelContentFilter:
@@ -41,8 +47,21 @@ class ChannelContentFilter:
         self.allowed = compile_terms(rules['allow_terms'])
         names = [name for roster in rules['blocked_players'].values() for name in roster]
         self.blocked = compile_terms([
-            *rules['blocked_teams'], *rules['blocked_aliases'], *player_terms(names),
+            *rules['blocked_teams'], *player_terms(names),
         ])
+        # Bare first names never block. Surnames and nicknames are only evidence
+        # when the same text also clearly discusses that player's sport.
+        self.contextual = []
+        for sport, teams in (
+            ('baseball', ('Yankees', 'Mets')),
+            ('basketball', ('Knicks', 'Nets')),
+            ('hockey', ('Rangers', 'Islanders', 'Devils')),
+        ):
+            surnames = [re.sub(r'\s+(?:Jr\.?|Sr\.?|II|III|IV)$', '', name).split()[-1]
+                        for team in teams for name in rules['blocked_players'][team]]
+            aliases = rules['contextual_aliases'][sport]
+            self.contextual.append((sport, compile_terms(SPORT_CONTEXT[sport]),
+                                    compile_terms([*surnames, *aliases])))
 
     def blocked_reason(self, channel_id, username, tweet, parsed_tweet=None):
         if str(channel_id) != self.channel_id or username.casefold().lstrip('@') in self.exempt_accounts:
@@ -67,7 +86,14 @@ class ChannelContentFilter:
         if self.allowed.search(text):
             return None
         match = self.blocked.search(text)
-        return match.group(0) if match else None
+        if match:
+            return match.group(0)
+        for sport, context, names in self.contextual:
+            if context.search(text):
+                match = names.search(text)
+                if match:
+                    return f'{match.group(0)} ({sport} context)'
+        return None
 
 
 GIANTS_CHANNEL_FILTER = ChannelContentFilter(json.loads(
