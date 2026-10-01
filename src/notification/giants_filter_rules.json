@@ -11,6 +11,24 @@
     "New York Giants",
     "NewYorkGiants",
     "NFL",
+    "football",
+    "quarterback",
+    "quarterbacks",
+    "touchdown",
+    "touchdowns",
+    "wide receiver",
+    "running back",
+    "tight end",
+    "offensive line",
+    "defensive line",
+    "cornerback",
+    "linebacker",
+    "pass rusher",
+    "QB",
+    "WR",
+    "RB",
+    "TE",
+    "CB",
     "John Harbaugh",
     "Harbaugh",
     "Jaxson Dart",
@@ -277,7 +295,8 @@
       "Remi Poirier"
     ]
   },
-  "blocked_aliases": [
+  "contextual_aliases": {
+    "baseball": [
     "All Rise",
     "AllRise",
     "The Judge",
@@ -289,7 +308,9 @@
     "Mr Smile",
     "Mr. Smile",
     "MrSmile",
-    "Soto Shuffle",
+    "Soto Shuffle"
+    ],
+    "basketball": [
     "KAT",
     "Big Bodega",
     "Deuce",
@@ -298,7 +319,9 @@
     "Big Body Brunson",
     "OG",
     "MPJ",
-    "Day Day",
+    "Day Day"
+    ],
+    "hockey": [
     "Barzy",
     "Zibby",
     "Shesty",
@@ -308,7 +331,8 @@
     "Little Jizzy",
     "Lil Jizzy",
     "Dougie"
-  ],
+    ]
+  },
   "sources": [
     "https://statsapi.mlb.com/api/v1/teams/147/roster?rosterType=40Man",
     "https://statsapi.mlb.com/api/v1/teams/121/roster?rosterType=40Man",
