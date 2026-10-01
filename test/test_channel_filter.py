@@ -18,7 +18,7 @@ class TestGiantsChannelFilter(unittest.TestCase):
             with self.subTest(term=term):
                 self.assertIsNone(self.reason(f'{term} watched the Yankees'))
 
-    def test_every_roster_player_full_first_and_last_name(self):
+    def test_every_roster_player_full_name(self):
         import json
         from pathlib import Path
         rules = json.loads(Path('src/notification/giants_filter_rules.json').read_text())
@@ -29,12 +29,37 @@ class TestGiantsChannelFilter(unittest.TestCase):
                     if not FILTER.allowed.search(normalize(term)):
                         self.assertIsNotNone(self.reason(f'{term} is playing tonight'))
 
-    def test_all_team_names_nicknames_accents_and_case(self):
+    def test_all_team_names_contextual_nicknames_accents_and_case(self):
         for text in ('YANKEES!', '#Mets', 'Knicks', 'Nets', 'Rangers', 'Islanders', 'Devils',
-                     'Deuce scored', 'KAT scored', 'The Martian homered', '#AllRise',
+                     'Deuce dunked', 'KAT hit a three pointer', 'The Martian homered', '#AllRise MLB',
                      'José Caballero', 'Jose Caballero', 'J.C. Escarra', 'JC Escarra'):
             with self.subTest(text=text):
                 self.assertIsNotNone(self.reason(text))
+
+    def test_first_names_and_ambiguous_names_do_not_block(self):
+        for text in ('Aaron made a great throw', 'Max is back', 'Will play tonight',
+                     'Ben is ready', 'Judge made the call', 'Rice is back',
+                     'Cole had a good day', 'Hill looks healthy', 'OG is back',
+                     'Deuce looks good', 'All rise', 'Gerrit is ready'):
+            with self.subTest(text=text):
+                self.assertIsNone(self.reason(text))
+
+    def test_mlb_context_requires_specific_player_evidence(self):
+        for text in ('Judge hit a homer', 'Cole left after six innings',
+                     'Goldy had three RBI', 'Lindor had two at bats'):
+            with self.subTest(text=text):
+                self.assertIsNotNone(self.reason(text))
+        for text in ('Aaron is playing baseball', 'Great throw by Aaron',
+                     'Max went to a game', 'A good baseball game tonight'):
+            with self.subTest(text=text):
+                self.assertIsNone(self.reason(text))
+
+    def test_football_context_wins_even_with_strong_baseball_evidence(self):
+        for text in ('Aaron Judge met a quarterback', 'Yankees players love football',
+                     'Judge hit a homer while Nabers scored a touchdown',
+                     'Knicks welcomed the WR', 'NFL fans watched KAT dunk'):
+            with self.subTest(text=text):
+                self.assertIsNone(self.reason(text))
 
     def test_scope_and_official_account(self):
         self.assertIsNone(self.reason('Knicks', channel='1543703698268495922'))
