@@ -39,6 +39,42 @@ SPORT_CONTEXT = {
     'hockey': ['hockey', 'NHL', 'puck', 'goalie', 'goalies', 'power play', 'slapshot'],
 }
 
+# Words/phrases that can be ordinary prose or generic nicknames. Mere sport
+# co-occurrence is insufficient; require a directly attached athlete action.
+AMBIGUOUS_NAMES = {
+    'judge', 'the judge', 'rice', 'hill', 'wells', 'cole', 'fried', 'morel',
+    'young', 'stock', 'brown', 'glass', 'fox', 'wolf', 'bridges', 'towns',
+    'miller', 'warren', 'jones', 'allen', 'scott', 'hart', 'mann', 'mayfield',
+    'johnson', 'nelson', 'ellis', 'porter', 'powell', 'sharpe', 'burns',
+    'day day', 'big g', 'og', 'jb', 'kat', 'deuce', 'dougie', 'all rise',
+    'allrise', 'white whale', 'the martian',
+}
+ATHLETE_ACTION = {
+    'baseball': re.compile(
+        r'(?:homered|homers|struck out|pitched|batting|at bat|'
+        r'left after (?:\w+ ){1,3}innings|'
+        r'(?:hit|hits|hitting) (?:\w+ ){0,3}(?:homer|homers|home run|home runs)|'
+        r'(?:drove|drives) in (?:\w+ ){0,2}(?:run|runs)|'
+        r'(?:had|has) (?:\w+ ){0,2}(?:rbi|at bats))\b'),
+    'basketball': re.compile(
+        r'(?:dunked|dunks|dunking|hit (?:a |another )?three pointer|'
+        r'(?:made|makes) (?:\w+ ){0,2}(?:free throw|free throws))\b'),
+    'hockey': re.compile(
+        r'(?:scored|scores|scoring|saved|saves|stopped|stops|'
+        r'fired (?:a |another )?slapshot)\b'),
+}
+
+
+def clearly_refers_to_player(text, match, sport):
+    if match.group(0) not in AMBIGUOUS_NAMES:
+        return True
+    tail = text[match.end():].lstrip()
+    if ATHLETE_ACTION[sport].match(tail):
+        return True
+    # Recognize "Judge just homered" but not "I'll judge the baseball game".
+    tail = re.sub(r'^(?:(?:just|has|had|will|is|was) ){0,2}', '', tail)
+    return bool(ATHLETE_ACTION[sport].match(tail))
+
 
 class ChannelContentFilter:
     def __init__(self, rules):
@@ -82,17 +118,20 @@ class ChannelContentFilter:
                 collect(getattr(post, 'retweeted_tweet', None))
                 collect(getattr(post, 'quoted_tweet', None))
             collect(tweet)
-        text = normalize('\n'.join(str(piece) for piece in pieces if piece))
-        if self.allowed.search(text):
+        texts = [normalize(piece) for piece in pieces if piece]
+        if any(self.allowed.search(text) for text in texts):
             return None
-        match = self.blocked.search(text)
-        if match:
-            return match.group(0)
-        for sport, context, names in self.contextual:
-            if context.search(text):
-                match = names.search(text)
-                if match:
-                    return f'{match.group(0)} ({sport} context)'
+        # Do not combine unrelated words from the commentary and quoted post
+        # into invented names or player/action phrases.
+        for text in texts:
+            match = self.blocked.search(text)
+            if match:
+                return match.group(0)
+            for sport, context, names in self.contextual:
+                if context.search(text):
+                    for match in names.finditer(text):
+                        if clearly_refers_to_player(text, match, sport):
+                            return f'{match.group(0)} ({sport} context)'
         return None
 
 
