@@ -31,7 +31,7 @@ class TestGiantsChannelFilter(unittest.TestCase):
 
     def test_all_team_names_contextual_nicknames_accents_and_case(self):
         for text in ('YANKEES!', '#Mets', 'Knicks', 'Nets', 'Rangers', 'Islanders', 'Devils',
-                     'Deuce dunked', 'KAT hit a three pointer', 'The Martian homered', '#AllRise MLB',
+                     'Deuce dunked', 'KAT hit a three pointer', 'The Martian homered', '#AllRise homered',
                      'José Caballero', 'Jose Caballero', 'J.C. Escarra', 'JC Escarra'):
             with self.subTest(text=text):
                 self.assertIsNotNone(self.reason(text))
@@ -60,6 +60,34 @@ class TestGiantsChannelFilter(unittest.TestCase):
                      'Knicks welcomed the WR', 'NFL fans watched KAT dunk'):
             with self.subTest(text=text):
                 self.assertIsNone(self.reason(text))
+
+    def test_ordinary_words_are_not_players_even_in_sports_prose(self):
+        for text in ("John Harbaugh's hire will be judged years later",
+                     "I'll be the judge of how the Giants did this week",
+                     "I'll be the judge of this baseball game",
+                     'The MLB decision will be judged years later',
+                     'Baseball fans cannot judge that decision yet',
+                     'Rice and beans before watching baseball',
+                     'Basketball builds bridges between communities',
+                     'The glass at the hockey rink broke',
+                     'All rise before the baseball game',
+                     'The Martian is a movie for baseball fans',
+                     'An OG basketball fan', 'A hockey fan saw a fox'):
+            with self.subTest(text=text):
+                self.assertIsNone(self.reason(text))
+
+    def test_ambiguous_names_require_direct_athlete_action(self):
+        for text in ('Judge just homered', 'The Judge hit another home run',
+                     'Rice hit a homer', 'Cole pitched six innings',
+                     'Deuce dunked in the NBA game', 'Glass scored in the NHL game'):
+            with self.subTest(text=text):
+                self.assertIsNotNone(self.reason(text))
+
+    def test_commentary_and_quote_do_not_invent_player_references(self):
+        self.assertIsNone(self.reason('I will judge', quote='Homered in baseball yesterday'))
+        self.assertIsNone(self.reason('MLB fans will judge the decision', quote='I disagree'))
+        self.assertIsNotNone(self.reason('MLB fans will judge the decision', quote='Judge homered'))
+        self.assertIsNotNone(self.reason('MLB fans will judge the decision but Lindor had two at bats'))
 
     def test_scope_and_official_account(self):
         self.assertIsNone(self.reason('Knicks', channel='1543703698268495922'))
