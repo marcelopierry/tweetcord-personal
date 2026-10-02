@@ -13,6 +13,12 @@ nicknames only block alongside clear context for that player's sport: for
 example, "Judge hit a homer" or "Cole pitched six innings", but not "Aaron
 made a great throw", "Rice is back", or "OG is back". Generic baseball context
 without a recognized player surname/nickname is allowed.
+Names/nicknames that also form ordinary words or phrases (Judge, Rice, Bridges,
+Glass, OG, All Rise, and others) additionally require an immediately attached
+athlete action. "Judge just homered" is evidence; "I'll be the judge of this
+baseball game" is not. Whole-word matching does not confuse judge with judged
+or judgment. Commentary and quoted text are evaluated separately for blocking
+evidence, so they cannot accidentally form a name/action across the boundary.
 Football terms such as football, quarterback, touchdown, wide receiver and QB
 also override every block, including explicit team names and full player names.
 Matching ignores case/accents and uses whole words/phrases, including hashtags.
