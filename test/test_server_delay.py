@@ -156,7 +156,8 @@ class ServerDelayTests(unittest.IsolatedAsyncioTestCase):
                          followup=NS(send=AsyncMock()))
         await cog._set_send_delay(interaction, 4)
         cog.account_tracker.set_notification_delay.assert_awaited_once_with(11, 240)
-        self.assertIn('Other servers are unchanged', interaction.followup.send.call_args.args[0])
+        self.assertNotIn('Other servers', interaction.followup.send.call_args.args[0])
+        self.assertIn('Updated **2** currently queued tweet(s)', interaction.followup.send.call_args.args[0])
 
     async def test_command_in_dm_does_not_change_any_delay(self):
         cog = self.Notification.__new__(self.Notification)
