@@ -1,6 +1,18 @@
 from typing import Any
 
 
+class XClientNotReady(RuntimeError):
+    pass
+
+
+def notifier_x_client(tracker, account_name):
+    """Commands share the tracker's authenticated, serialized X connection."""
+    client = tracker.x_clients.get(account_name)
+    if client is None:
+        raise XClientNotReady(account_name)
+    return client
+
+
 def notifier_settings_unchanged(notification: Any, role_id: str, enable_type: str, media_type: str) -> bool:
     """Return whether an enabled notifier already has the requested settings."""
     if notification is None:
