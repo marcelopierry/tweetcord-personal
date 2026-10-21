@@ -271,9 +271,10 @@ class ParsedTweet():
             facet_text = text[start:end]
             
             if f_type == 'url':
-                display = html.unescape(str(facet.get('display') or original))
-                replacement = facet.get('replacement', original)
-                md_link = f"[{display}]({replacement})"
+                # The upstream display label is shortened (often ending in …).
+                # Show the expanded URL itself so the full address remains
+                # visible and clickable in Discord, not just its hidden target.
+                md_link = html.unescape(str(facet.get('replacement') or original or facet_text))
             elif f_type == 'media':
                 md_link = ""
             elif f_type in ['mention', 'hashtag']:
