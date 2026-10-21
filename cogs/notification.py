@@ -392,18 +392,22 @@ class Notification(Cog_Extension):
                     await itn.followup.send(t('notification.customize.translation.user_not_found', username=username), ephemeral=True)
 
     async def _set_send_delay(self, itn: discord.Interaction, minutes: int):
+        if itn.guild_id is None:
+            await itn.response.send_message('Please run this command in the server whose delay you want to change.', ephemeral=True)
+            return
         await itn.response.defer(ephemeral=True)
         seconds = int(minutes) * 60
-        queued = await self.account_tracker.set_notification_delay(seconds)
+        queued = await self.account_tracker.set_notification_delay(itn.guild_id, seconds)
         await itn.followup.send(
-            f'Post-detection send delay set to **{minutes} minute(s)**. Updated **{queued}** currently queued tweet(s).',
+            f'Post-detection send delay for **this server** set to **{minutes} minute(s)**. '
+            f'Updated **{queued}** currently queued tweet(s) in this server. Other servers are unchanged.',
             ephemeral=True,
         )
 
-    @customize_group.command(name='send-delay', description='Set how long to wait after finding a tweet before sending it.')
+    @customize_group.command(name='send-delay', description='Set this server’s wait after finding a tweet before sending it.')
     @app_commands.describe(minutes='Minutes to wait after a tweet is found (0 to 60).')
     async def customize_send_delay(self, itn: discord.Interaction, minutes: app_commands.Range[int, 0, 60]):
-        """Change the persistent post-detection delay and reschedule queued tweets."""
+        """Change only this server's delay and reschedule its queued tweets."""
         await self._set_send_delay(itn, minutes)
 
     @r_notifier.autocomplete('channel_id')
