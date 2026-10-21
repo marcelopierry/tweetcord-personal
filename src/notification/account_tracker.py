@@ -22,6 +22,7 @@ from src.notification.date_comparator import date_comparator
 from src.notification.x_auth import authenticate_x, recover_x_account
 from src.notification.delay_queue import DelayedTweetBuffer
 from src.notification.server_delay import ServerDelays
+from src.notification.server_delivery import ServerDelivery
 from src.notification.x_validation import TweetSuperseded, validate_on_x
 from src.notification.subscriptions import ensure_subscription
 from src.notification.x_connection import XConnection
@@ -49,6 +50,8 @@ class AccountTracker():
         self.ready_tweets = {}
         self.unavailable_checks: dict[tuple[str, str, str], int] = {}
         self.server_delays = ServerDelays(configs.get('notification_delay_seconds', 180))
+        self.server_delivery = ServerDelivery()
+        self.server_command_locks = {}
         self.session = None
         self.x_clients = {}
         self.feed_checked_at = {}
@@ -82,10 +85,29 @@ class AccountTracker():
         log.info(f'server {server_id} notification delay changed to {delay_seconds} seconds; updated {queued} queued tweets')
         return queued
 
+    async def set_server_enabled(self, server_id: int, enabled: bool) -> bool:
+        command_lock = self.server_command_locks.setdefault(str(server_id), asyncio.Lock())
+        async with command_lock:
+            async with lock:
+                # Commands can arrive just as startup is loading persisted state.
+                await self.server_delivery.load(self.db_path)
+                changed = await self.server_delivery.set_enabled(self.db_path, server_id, enabled)
+            if changed:
+                for collection in (self.pending_tweets, self.ready_tweets):
+                    for key in list(collection):
+                        if key[2] == str(server_id):
+                            collection.pop(key, None)
+            if not enabled:
+                # Finish any tweet already in flight before confirming suspension.
+                await self.server_delivery.drain(server_id)
+            log.info(f'server {server_id} tweet delivery enabled={enabled}')
+            return changed
+
     def pending_batches(self, username, client_used, candidates, server_ids, now=None):
         """Queue each discovered post independently for every destination server."""
         now = now or datetime.now(timezone.utc)
         server_ids = {str(value) for value in server_ids}
+        server_ids = {value for value in server_ids if self.server_delivery.enabled(value)}
         prefix = (client_used, username)
         for collection in (self.pending_tweets, self.ready_tweets):
             for key in list(collection):
@@ -96,7 +118,8 @@ class AccountTracker():
             key = (*prefix, server_id)
             pending = self.pending_tweets.setdefault(key, DelayedTweetBuffer(self.server_delays.get(server_id)))
             for tweet in candidates or []:
-                pending.add(tweet, now)
+                if self.server_delivery.allows(server_id, tweet):
+                    pending.add(tweet, now)
             ready = pending.pop_ready(now)
             self.ready_tweets[key] = ready
             if ready:
@@ -123,6 +146,8 @@ class AccountTracker():
         await self.bot.wait_until_ready()
         self.session = aiohttp.ClientSession()
         await self.load_notification_delay()
+        async with lock:
+            await self.server_delivery.load(self.db_path)
         if configs['init_latest_tweet_on_startup']:
             await init_latest_tweet_on_startup(self.db_path)
 
@@ -462,6 +487,8 @@ class AccountTracker():
             for server_id, pending, tweets in batches:
                 validated = []
                 for tweet in tweets:
+                    if not self.server_delivery.allows(server_id, tweet):
+                        continue
                     status, fresh_parsed_tweet = await self._refresh_ready_tweet(
                         pending, tweet, username, client_used, server_id,
                     )
@@ -525,15 +552,17 @@ class AccountTracker():
                             pending.defer(tweet, retry_seconds=60)
                             log.info(f'deferred retweet {tweet.id} in channel {channel.id}: queued original has priority')
                             continue
-                        await self._deliver_tweet_to_channel(
-                            username,
-                            tweet,
-                            data,
-                            channel,
-                            current_p_tweet,
-                            current_view,
-                            lang,
-                        )
+                        async with self.server_delivery.delivery(server_id, tweet) as allowed:
+                            if allowed:
+                                await self._deliver_tweet_to_channel(
+                                    username,
+                                    tweet,
+                                    data,
+                                    channel,
+                                    current_p_tweet,
+                                    current_view,
+                                    lang,
+                                )
 
     async def tweetsUpdater(self, app: Twitter):
         updater_name = asyncio.current_task().get_name().split('_', 1)[1]
