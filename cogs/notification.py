@@ -400,7 +400,7 @@ class Notification(Cog_Extension):
         queued = await self.account_tracker.set_notification_delay(itn.guild_id, seconds)
         await itn.followup.send(
             f'Post-detection send delay for **this server** set to **{minutes} minute(s)**. '
-            f'Updated **{queued}** currently queued tweet(s) in this server. Other servers are unchanged.',
+            f'Updated **{queued}** currently queued tweet(s) in this server.',
             ephemeral=True,
         )
 
