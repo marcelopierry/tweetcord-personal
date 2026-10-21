@@ -21,6 +21,7 @@ from src.notification.get_tweets import get_tweets
 from src.notification.date_comparator import date_comparator
 from src.notification.x_auth import authenticate_x, recover_x_account
 from src.notification.delay_queue import DelayedTweetBuffer
+from src.notification.server_delay import ServerDelays
 from src.notification.x_validation import TweetSuperseded, validate_on_x
 from src.notification.subscriptions import ensure_subscription
 from src.notification.x_connection import XConnection
@@ -44,10 +45,10 @@ class AccountTracker():
         self.accounts_data = get_accounts()
         self.db_path = os.path.join(os.getenv('DATA_PATH'), 'tracked_accounts.db')
         self.tweets = {account_name: [] for account_name in self.accounts_data.keys()}
-        self.pending_tweets: dict[tuple[str, str], DelayedTweetBuffer] = {}
+        self.pending_tweets: dict[tuple[str, str, str], DelayedTweetBuffer] = {}
         self.ready_tweets = {}
         self.unavailable_checks: dict[tuple[str, str, str], int] = {}
-        self.notification_delay_seconds = int(configs.get('notification_delay_seconds', 180))
+        self.server_delays = ServerDelays(configs.get('notification_delay_seconds', 180))
         self.session = None
         self.x_clients = {}
         self.feed_checked_at = {}
@@ -64,33 +65,59 @@ class AccountTracker():
         bot.loop.create_task(self.setup_tasks())
 
     async def load_notification_delay(self) -> None:
-        async with connect_readonly(self.db_path) as db:
-            async with db.execute("SELECT value FROM runtime_setting WHERE key = 'notification_delay_seconds'") as cursor:
-                row = await cursor.fetchone()
-        if row:
-            try:
-                self.notification_delay_seconds = max(0, int(row[0]))
-            except (TypeError, ValueError):
-                log.warning('invalid stored notification delay; using configured default')
+        async with lock:
+            await self.server_delays.load(self.db_path, [guild.id for guild in self.bot.guilds])
 
-    async def set_notification_delay(self, delay_seconds: int) -> int:
-        """Persist a global delay and shift every queued tweet retroactively."""
+    async def set_notification_delay(self, server_id: int, delay_seconds: int) -> int:
+        """Persist and reschedule only this server's pending notifications."""
         delay_seconds = max(0, int(delay_seconds))
         async with lock:
-            async with aiosqlite.connect(self.db_path, timeout=10) as db:
-                await db.execute(
-                    'INSERT OR REPLACE INTO runtime_setting (key, value) VALUES (?, ?)',
-                    ('notification_delay_seconds', str(delay_seconds)),
-                )
-                await db.commit()
-
-        self.notification_delay_seconds = delay_seconds
+            await self.server_delays.set(self.db_path, server_id, delay_seconds)
         queued = 0
-        for pending in self.pending_tweets.values():
+        for key, pending in self.pending_tweets.items():
+            if key[2] != str(server_id):
+                continue
             pending.set_delay_seconds(delay_seconds)
             queued += len(pending)
-        log.info(f'global notification delay changed to {delay_seconds} seconds; updated {queued} queued tweets')
+        log.info(f'server {server_id} notification delay changed to {delay_seconds} seconds; updated {queued} queued tweets')
         return queued
+
+    def pending_batches(self, username, client_used, candidates, server_ids, now=None):
+        """Queue each discovered post independently for every destination server."""
+        now = now or datetime.now(timezone.utc)
+        server_ids = {str(value) for value in server_ids}
+        prefix = (client_used, username)
+        for collection in (self.pending_tweets, self.ready_tweets):
+            for key in list(collection):
+                if key[:2] == prefix and key[2] not in server_ids:
+                    collection.pop(key, None)
+        batches = []
+        for server_id in sorted(server_ids):
+            key = (*prefix, server_id)
+            pending = self.pending_tweets.setdefault(key, DelayedTweetBuffer(self.server_delays.get(server_id)))
+            for tweet in candidates or []:
+                pending.add(tweet, now)
+            ready = pending.pop_ready(now)
+            self.ready_tweets[key] = ready
+            if ready:
+                batches.append((server_id, pending, ready))
+        return batches
+
+    async def notification_settings(self, username):
+        async with connect_readonly(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            # Always join the server, regardless of translation settings.
+            rows = await (await db.execute('''
+                SELECT n.*, c.server_id, suc.translate AS server_translate
+                FROM notification n JOIN user u ON u.id=n.user_id
+                JOIN channel c ON c.id=n.channel_id
+                LEFT JOIN server_user_config suc ON suc.server_id=c.server_id AND suc.user_id=n.user_id
+                WHERE u.username=? AND u.enabled=1 AND n.enabled=1
+            ''', (username,))).fetchall()
+        by_server = {}
+        for row in rows:
+            by_server.setdefault(str(row['server_id']), []).append(row)
+        return by_server
 
     async def setup_tasks(self):
         await self.bot.wait_until_ready()
@@ -334,10 +361,13 @@ class AccountTracker():
         tweet,
         username: str,
         client_used: str,
+        server_id: str | None = None,
     ) -> tuple[str, ParsedTweet | None]:
         """Require a current upstream representation before a delayed send."""
         tweet_key = str(getattr(tweet, 'id', None) or getattr(tweet, 'url', ''))
         validation_key = (client_used, username, tweet_key)
+        if server_id is not None:
+            validation_key += (str(server_id),)
 
         try:
             async with self.x_validation_lock:
@@ -369,14 +399,16 @@ class AccountTracker():
         self.unavailable_checks.pop(validation_key, None)
         return 'available', parsed_tweet
 
-    async def queued_original_for_channel(self, tweet, parsed_tweet, channel_id):
+    async def queued_original_for_channel(self, tweet, parsed_tweet, channel_id, server_id=None):
         if not getattr(tweet, 'is_retweet', False):
             return False
         original_id = get_delivery_references(tweet, parsed_tweet).original_id
         if not original_id:
             return False
-        pools = [buffer.tweets() for buffer in self.pending_tweets.values()]
-        pools.extend(self.ready_tweets.values())
+        def same_server(key):
+            return server_id is None or len(key) < 3 or key[2] == str(server_id)
+        pools = [buffer.tweets() for key, buffer in self.pending_tweets.items() if same_server(key)]
+        pools.extend(tweets for key, tweets in self.ready_tweets.items() if same_server(key))
         for candidate in (candidate for pool in pools for candidate in pool):
             if getattr(candidate, 'is_retweet', False) or str(getattr(candidate, 'id', '')) != original_id:
                 continue
@@ -398,7 +430,9 @@ class AccountTracker():
 
     async def notification(self, username: str, client_used: str):
         while True:
-            self.ready_tweets[(client_used, username)] = []
+            for key in list(self.ready_tweets):
+                if key[:2] == (client_used, username):
+                    self.ready_tweets[key] = []
             await asyncio.sleep(configs['tweets_check_period'])
 
             last_tweet_at = self.latest_tweet_timestamps.get((username, client_used))
@@ -407,18 +441,14 @@ class AccountTracker():
                 log.warning(f"no timestamp for {username}, task will terminate.")
                 break
 
-            pending = self.pending_tweets.setdefault(
-                (client_used, username),
-                DelayedTweetBuffer(self.notification_delay_seconds),
-            )
+            try:
+                notifications_by_server = await self.notification_settings(username)
+            except aiosqlite.OperationalError as error:
+                log.warning(f'unable to read notification destinations for {username}: {type(error).__name__}')
+                continue
             candidates = await get_tweets(self.tweets[client_used], username, last_tweet_at)
-            if candidates:
-                now = datetime.now(timezone.utc)
-                for tweet in candidates:
-                    pending.add(tweet, now)
-
-            latest_tweets = pending.pop_ready()
-            self.ready_tweets[(client_used, username)] = latest_tweets
+            batches = self.pending_batches(username, client_used, candidates, notifications_by_server)
+            latest_tweets = [tweet for _, _, tweets in batches for tweet in tweets]
             if not latest_tweets:
                 continue
             
@@ -428,51 +458,21 @@ class AccountTracker():
                 self.latest_tweet_timestamps[(username, client_used)] = str(newest_timestamp)
                 await self.db_write_queue.put((username, newest_timestamp))
 
-            validated_tweets: list[tuple[object, ParsedTweet]] = []
-            for tweet in latest_tweets:
-                status, fresh_parsed_tweet = await self._refresh_ready_tweet(
-                    pending,
-                    tweet,
-                    username,
-                    client_used,
-                )
-                if status == 'available' and fresh_parsed_tweet is not None:
-                    validated_tweets.append((tweet, fresh_parsed_tweet))
-
-            self.ready_tweets[(client_used, username)] = [tweet for tweet, _ in validated_tweets]
+            validated_tweets = []
+            for server_id, pending, tweets in batches:
+                validated = []
+                for tweet in tweets:
+                    status, fresh_parsed_tweet = await self._refresh_ready_tweet(
+                        pending, tweet, username, client_used, server_id,
+                    )
+                    if status == 'available' and fresh_parsed_tweet is not None:
+                        validated_tweets.append((server_id, pending, tweet, fresh_parsed_tweet))
+                        validated.append(tweet)
+                self.ready_tweets[(client_used, username, server_id)] = validated
             if not validated_tweets:
                 continue
 
-            user = None
-            notifications = []
-            try:
-                async with connect_readonly(self.db_path) as db:
-                    db.row_factory = aiosqlite.Row
-                    async with db.cursor() as cursor:
-                        await cursor.execute('SELECT id FROM user WHERE username = ?', (username,))
-                        user = await cursor.fetchone()
-                        if user:
-                            if IS_TRANSLATION_ENABLED:
-                                await cursor.execute('''
-                                    SELECT n.*, suc.translate AS server_translate
-                                    FROM notification n
-                                    JOIN channel c ON n.channel_id = c.id
-                                    LEFT JOIN server_user_config suc ON c.server_id = suc.server_id AND n.user_id = suc.user_id
-                                    WHERE n.user_id = ? AND n.enabled = 1
-                                ''', (user['id'],))
-                            else:
-                                await cursor.execute('SELECT * FROM notification WHERE user_id = ? AND enabled = 1', (user['id'],))
-                            notifications = await cursor.fetchall()
-            except aiosqlite.OperationalError as e:
-                if "database is locked" in str(e):
-                    log.warning(f"database locked while reading notification settings for {username}, this is unexpected but handled.")
-                else:
-                    raise
-            
-            if not user:
-                continue
-
-            for tweet, fresh_parsed_tweet in validated_tweets:
+            for server_id, pending, tweet, fresh_parsed_tweet in validated_tweets:
                 log.info(f'find a new tweet from {username}')
                 
                 content_cache: dict[str, tuple[ParsedTweet | None, discord.ui.View | None]] = {}
@@ -486,7 +486,7 @@ class AccountTracker():
                 if EMBED_TYPE == 'proxy' and configs['embed']['proxy']['original_url_button']:
                     view = gen_view(t('display.button.view_original'), tweet.url)
 
-                for data in notifications:
+                for data in notifications_by_server[server_id]:
                     channel = self.bot.get_channel(int(data['channel_id']))
                     if channel is None or not is_match_type(tweet, data['enable_type']):
                         continue
@@ -521,7 +521,7 @@ class AccountTracker():
                     # same moment. Hold the channel lock until links, cards, both
                     # media groups, previews, and history are all complete.
                     async with self.delivery_sequencer.lock_for(channel.id):
-                        if await self.queued_original_for_channel(tweet, current_p_tweet, channel.id):
+                        if await self.queued_original_for_channel(tweet, current_p_tweet, channel.id, server_id):
                             pending.defer(tweet, retry_seconds=60)
                             log.info(f'deferred retweet {tweet.id} in channel {channel.id}: queued original has priority')
                             continue
@@ -616,8 +616,10 @@ class AccountTracker():
         # Remove from cache so the monitor doesn't restart it
         if key_to_remove and key_to_remove in self.latest_tweet_timestamps:
             del self.latest_tweet_timestamps[key_to_remove]
-            self.pending_tweets.pop((key_to_remove[1], username), None)
-            self.ready_tweets.pop((key_to_remove[1], username), None)
+            for collection in (self.pending_tweets, self.ready_tweets):
+                for key in list(collection):
+                    if key[:2] == (key_to_remove[1], username):
+                        collection.pop(key, None)
 
         # Cancel the running task
         for task in asyncio.all_tasks():
