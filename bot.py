@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from src.checker import build_and_validate_configs, check_env, check_db, check_upgrade
 from src.log import setup_logger
+from src.discord_guard import ProtectedBot
 
 log = setup_logger(__name__)
 load_dotenv()
@@ -15,11 +16,11 @@ load_dotenv()
 # --- Pre-boot Checks ---
 if not check_env():
     log.critical('incomplete environment variables detected, please check your .env file. Exiting...')
-    sys.exit(1)
+    sys.exit(78)
 
 if not build_and_validate_configs():
     log.critical('failed to build application configuration, please check logs for details. Exiting...')
-    sys.exit(1)
+    sys.exit(78)
 
 # --- Configs are now safe to load ---
 from configs.load_configs import configs
@@ -36,11 +37,10 @@ intents = discord.Intents(
     message_content=configs.get('enable_prefix_commands_in_guild', True),
     emojis=True
 )
-bot = commands.Bot(command_prefix=configs['prefix'], intents=intents)
+bot = ProtectedBot(command_prefix=configs['prefix'], intents=intents)
 
 
-@bot.event
-async def on_ready():
+async def initialize_once():
     await init_db()
     check_upgrade()
         
@@ -55,15 +55,21 @@ async def on_ready():
     else:
         log.info('database check passed')
 
-    await update_presence(bot)
-
     bot.tree.on_error = on_tree_error
     for filename in os.listdir('./cogs'):
-        if filename.endswith('.py'):
+        if filename.endswith('.py') and f'cogs.{filename[:-3]}' not in bot.extensions:
             await bot.load_extension(f'cogs.{filename[:-3]}')
-    log.info(f'{bot.user} is online')
     slash = await bot.tree.sync()
     log.info(f'synced {len(slash)} slash commands')
+
+
+bot.initialize_once = initialize_once
+
+
+@bot.event
+async def on_ready():
+    await update_presence(bot)
+    log.info(f'{bot.user} is online; gateway ready (initialization is not repeated)')
 
 
 @bot.command()
@@ -127,4 +133,9 @@ async def on_command_error(ctx: commands.context.Context, error: commands.errors
 
 
 if __name__ == '__main__':
-    bot.run(os.getenv('BOT_TOKEN'))
+    try:
+        bot.run(os.getenv('BOT_TOKEN'))
+    except (discord.LoginFailure, discord.PrivilegedIntentsRequired):
+        log.critical('Discord credentials/intents need attention. Stopping without automatic restart; '
+                     'fix the token/settings before starting the service again.')
+        sys.exit(78)
