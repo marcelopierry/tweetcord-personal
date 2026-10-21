@@ -15,7 +15,7 @@ A private, self-hosted Discord bot for forwarding posts from selected X/Twitter 
 - Known video links (including YouTube, Vimeo, TikTok, Twitch, Streamable, Dailymotion, and direct video files) are sent as individual follow-ups for native previews. Article and general website links remain only in the tweet text card.
 - Deliveries are serialized per Discord channel, so one tweet's links, cards, media groups, and video previews finish before any part of the next tweet is sent there.
 - `/list accounts` shows account names, while `/list settings` shows every account/channel configuration. The duplicate legacy `/list users` alias has been removed.
-- Startup defaults to ignoring the backlog from before the bot came online (`init_latest_tweet_on_startup: true`).
+- Startup preserves saved account timestamps (`init_latest_tweet_on_startup: false`), so maintenance restarts do not advance them past unsent posts. See [connection-storm protection](deploy/RECOVERY.md) for safe service restart settings.
 
 The final validation intentionally favors missing a post over sending content that can no longer be confirmed as current.
 
