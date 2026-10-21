@@ -271,7 +271,7 @@ class TestParsedTweet(unittest.TestCase):
         })
         self.assertEqual(
             parsed.text,
-            'Logic & good arguments. Source: [example.com/story](https://example.com/story)',
+            'Logic & good arguments. Source: https://example.com/story',
         )
 
     def test_fx_canonical_source_reference_is_retained_for_retweets(self):
