@@ -21,8 +21,9 @@ from src.utils import escape_markdown, safe_truncate
 
 log = setup_logger(__name__)
 
-WEBHOOK_NAME = 'Personal TweetCord delivery'
-WEBHOOK_SUFFIX = 'Personal TweetCord'
+WEBHOOK_NAME = 'Free Twitter Bot delivery'
+LEGACY_WEBHOOK_NAME = 'Personal TweetCord delivery'
+WEBHOOK_SUFFIX = 'Free Twitter Bot'
 MAX_ATTACHMENTS = 10
 QUOTE_ORIGINAL_EMOJI = '🔂'
 RETWEET_EMOJI = '🔄'
@@ -509,7 +510,10 @@ class TweetDelivery:
             webhooks = await webhook_channel.webhooks()
             webhook = discord.utils.find(lambda hook: hook.name == WEBHOOK_NAME, webhooks)
             if webhook is None:
-                webhook = await webhook_channel.create_webhook(name=WEBHOOK_NAME, reason='Personal TweetCord per-account delivery')
+                # Reuse existing installations rather than consume another webhook slot.
+                webhook = discord.utils.find(lambda hook: hook.name == LEGACY_WEBHOOK_NAME, webhooks)
+            if webhook is None:
+                webhook = await webhook_channel.create_webhook(name=WEBHOOK_NAME, reason='Free Twitter Bot per-account delivery')
             self._webhooks[channel_id] = webhook
             return webhook
         except (discord.Forbidden, discord.HTTPException) as error:
