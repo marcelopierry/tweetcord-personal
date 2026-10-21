@@ -1,4 +1,4 @@
-# Personal Tweetcord
+# Free Twitter Bot
 
 A private, self-hosted Discord bot for forwarding posts from selected X/Twitter accounts into selected Discord channels. This is based on [TweetCord](https://github.com/Yuuzi261/Tweetcord) and remains MIT-licensed.
 
@@ -10,7 +10,7 @@ A private, self-hosted Discord bot for forwarding posts from selected X/Twitter 
 - Per-notifier controls for original posts, retweets, and quote posts remain available through `/add notifier` and `/customize settings`.
 - Tweet text is HTML-decoded and displayed in compact Discord embed cards while links and uploaded media remain separate. Stale upstream media facets are ignored instead of deleting valid text. Quote tweets are ordered as the quote-post link, `🔂` plus the original link, both text cards, the quote post's media, and then the original post's media. A quote only records its own ID, so merely displaying the quoted original never suppresses a later retweet.
 - Retweets show the retweeter's webhook name/avatar, then the retweet link, `🔄` plus the original link, one text card attributed to the original author, and the original media. The synthetic `RT @account:` prefix is omitted. A retweet is suppressed per channel only when that original was previously delivered directly or by another retweet.
-- Deliveries use a channel webhook when the bot has **Manage Webhooks**, so each post can display the tracked X account's name and avatar without changing the bot's global identity. The bot falls back to its normal identity if that permission is unavailable.
+- Deliveries use a channel webhook when the bot has **Manage Webhooks**, so each post can display the tracked X account's name and avatar as `Account Name | Free Twitter Bot` without changing the bot's global identity. The bot falls back to its normal identity if that permission is unavailable. Existing delivery webhooks are reused after the rename.
 - With `embed.type: built_in`, photos and videos are downloaded and uploaded as Discord attachments when they fit the channel upload limit. Uploaded videos play in Discord; oversized media falls back to a direct media URL instead of requiring the X post page.
 - Known video links (including YouTube, Vimeo, TikTok, Twitch, Streamable, Dailymotion, and direct video files) are sent as individual follow-ups for native previews. Article and general website links remain only in the tweet text card.
 - Deliveries are serialized per Discord channel, so one tweet's links, cards, media groups, and video previews finish before any part of the next tweet is sent there.
