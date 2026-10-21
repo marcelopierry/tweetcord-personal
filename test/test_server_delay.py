@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from src.notification.account_tracker import AccountTracker
 from src.notification.server_delay import ServerDelays
+from src.notification.server_delivery import ServerDelivery
 from src.notification.delivery import ChannelDeliverySequencer
 from src.notification.utils import TweetUnavailable
 
@@ -34,6 +35,7 @@ class ServerDelayTests(unittest.IsolatedAsyncioTestCase):
         self.tracker.pending_tweets = {}
         self.tracker.ready_tweets = {}
         self.tracker.server_delays = ServerDelays(180)
+        self.tracker.server_delivery = ServerDelivery()
         self.now = datetime.now(timezone.utc).replace(microsecond=0)
         self.tweet = NS(id='100', created_on=self.now, url='https://x.com/example/status/100',
                         author=NS(username='example'), is_retweet=False)
