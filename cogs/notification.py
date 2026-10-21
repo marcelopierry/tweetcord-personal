@@ -3,7 +3,6 @@ import aiosqlite
 import discord
 from discord import app_commands
 from discord.ext import commands
-from tweety import Twitter
 from tweety.exceptions import RateLimitReached, UserProtected
 
 from configs.load_configs import configs, IS_TRANSLATION_ENABLED
@@ -13,7 +12,7 @@ from src.discord_ui.fetch_tracked_channels import fetch_tracked_channels
 from src.discord_ui.modal import CustomizeSettingsModal
 from src.log import setup_logger
 from src.notification.account_tracker import AccountTracker
-from src.notification.notifier_commands import notifier_settings_unchanged, selected_interaction_channel_id
+from src.notification.notifier_commands import XClientNotReady, notifier_x_client, notifier_settings_unchanged, selected_interaction_channel_id
 from src.permission import ADMINISTRATOR
 from src.db_function.readonly_db import connect_readonly
 from src.utils import get_accounts, get_lock, get_utcnow, validate_and_normalize_language
@@ -83,8 +82,7 @@ class Notification(Cog_Extension):
             db.row_factory = aiosqlite.Row
             async with db.cursor() as cursor:
                 try:
-                    app = Twitter(account_used)
-                    await app.connect()
+                    app = notifier_x_client(self.account_tracker, account_used)
                     try:
                         new_user = await resolve_user(app, username)
                     except RateLimitReached as error:
@@ -108,10 +106,8 @@ class Notification(Cog_Extension):
                         if configs['auto_change_client']:
                             if configs['auto_unfollow'] or configs['auto_turn_off_notification']:
                                 old_client_used = match_user['client_used']
-                                old_app = Twitter(old_client_used)
-                                
                                 try:
-                                    await old_app.connect()
+                                    old_app = notifier_x_client(self.account_tracker, old_client_used)
                                     if configs['auto_unfollow']:
                                         status = await old_app.unfollow_user(match_user['id'])
                                         log.info(f'successfully unfollowed {new_user.username} (due to client change)') if status else log.warning(f'unable to unfollow {new_user.username}')
@@ -198,6 +194,13 @@ class Notification(Cog_Extension):
                                 
                             await db.commit()
 
+                except XClientNotReady:
+                    await itn.followup.send(
+                        f'X account {account_used} is reconnecting. Please try again shortly.',
+                        ephemeral=True,
+                    )
+                    await db.rollback()
+                    return
                 except RateLimitReached as error:
                     retry_after = max(60, int(getattr(error, 'retry_after', 0) or 0))
                     minutes = max(1, (retry_after + 59) // 60)
@@ -209,7 +212,7 @@ class Notification(Cog_Extension):
                     await db.rollback()
                     return
                 except Exception as e:
-                    log.error(f'an error occurred while adding notifier: {e}')
+                    log.error(f'an error occurred while adding notifier for {username}: {type(e).__name__}')
                     await itn.followup.send(t('notification.add.failed'), ephemeral=True)
                     await db.rollback()
                     return
@@ -289,10 +292,8 @@ class Notification(Cog_Extension):
                                 await cursor.execute('SELECT client_used FROM user WHERE id = ?', (match_notifier['user_id'],))
                                 result = await cursor.fetchone()
                                 client_used = result['client_used']
-                                app = Twitter(client_used)
-                                await app.connect()
-                                
                                 try:
+                                    app = notifier_x_client(self.account_tracker, client_used)
                                     if configs['auto_unfollow']:
                                         status = await app.unfollow_user(match_notifier['user_id'])
                                         log.info(f'successfully unfollowed {username}') if status else log.warning(f'unable to unfollow {username}')
