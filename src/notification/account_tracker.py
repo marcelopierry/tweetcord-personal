@@ -1,6 +1,5 @@
 import asyncio
 import os
-import sys
 import re
 import aiohttp
 from datetime import datetime, timezone, timedelta
@@ -20,7 +19,7 @@ from src.notification.delivery_history import DeliveryHistory
 from src.notification.channel_filter import GIANTS_CHANNEL_FILTER
 from src.notification.get_tweets import get_tweets
 from src.notification.date_comparator import date_comparator
-from src.notification.x_bootstrap import prepare_x_bootstrap
+from src.notification.x_auth import authenticate_x, recover_x_account
 from src.notification.delay_queue import DelayedTweetBuffer
 from src.notification.x_validation import TweetSuperseded, validate_on_x
 from src.notification.subscriptions import ensure_subscription
@@ -94,6 +93,7 @@ class AccountTracker():
         return queued
 
     async def setup_tasks(self):
+        await self.bot.wait_until_ready()
         self.session = aiohttp.ClientSession()
         await self.load_notification_delay()
         if configs['init_latest_tweet_on_startup']:
@@ -106,37 +106,16 @@ class AccountTracker():
         # Wait for the initial timestamp load
         await self.timestamps_ready.wait()
 
-        async def authenticate_account(account_name, account_token):
-            app = prepare_x_bootstrap(Twitter(account_name))
-            max_attempts = configs['auth_max_attempts']
-            for attempt in range(max_attempts):
-                try:
-                    await app.load_auth_token(account_token)
-                    return app
-                except Exception as e:
-                    log.error(f"authentication failed for account: {account_name} [Attempt {attempt + 1}/{max_attempts}]")
-                    if attempt < max_attempts - 1:
-                        await asyncio.sleep(5)
-                    else:
-                        log.error(f"persistent authentication failure for account {account_name}")
-                        raise
-        
+        async def start_account(account_name, account_token):
+            app = await recover_x_account(account_name, account_token)
+            async def reconnect():
+                return await authenticate_x(account_name, account_token)
+            app = XConnection(app, reconnect)
+            self.x_clients[account_name] = app
+            self.bot.loop.create_task(self.tweetsUpdater(app)).set_name(f'TweetsUpdater_{account_name}')
+
         for account_name, account_token in self.accounts_data.items():
-            try:
-                app = await authenticate_account(account_name, account_token)
-                async def reconnect(name=account_name, token=account_token):
-                    replacement = prepare_x_bootstrap(Twitter(name))
-                    try:
-                        await replacement.load_auth_token(token)
-                    except BaseException:
-                        await replacement.request.session.aclose()
-                        raise
-                    return replacement
-                app = XConnection(app, reconnect)
-                self.x_clients[account_name] = app
-                self.bot.loop.create_task(self.tweetsUpdater(app)).set_name(f'TweetsUpdater_{account_name}')
-            except Exception:
-                sys.exit(1)
+            self.bot.loop.create_task(start_account(account_name, account_token)).set_name(f'XAuthentication_{account_name}')
 
         # Initial user list for notification tasks
         for (username, client_used), _ in self.latest_tweet_timestamps.items():
@@ -148,6 +127,9 @@ class AccountTracker():
     async def subscriptionMonitor(self):
         """Reconcile active subscriptions at startup and every thirty minutes."""
         while True:
+            if not self.x_clients:
+                await asyncio.sleep(5)
+                continue
             checked = repaired = failed = 0
             try:
                 async with connect_readonly(self.db_path) as db:
@@ -159,6 +141,8 @@ class AccountTracker():
                     try:
                         # Recheck membership so removals during the sweep stay removed.
                         if (username, account) not in self.latest_tweet_timestamps:
+                            continue
+                        if account not in self.x_clients:
                             continue
                         changed = await ensure_subscription(self.x_clients[account], user_id)
                         checked += 1
