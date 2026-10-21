@@ -197,7 +197,7 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
         )
         tweet = SimpleNamespace(author=SimpleNamespace(name='Original Author', username='Original', profile_image_url_https=None))
         name, avatar = build_webhook_identity('DiscussingFilm', tweet, parsed)
-        self.assertEqual(name, 'Discussing Film | Personal TweetCord')
+        self.assertEqual(name, 'Discussing Film | Free Twitter Bot')
         self.assertEqual(avatar, 'https://pbs.twimg.com/profile_images/example_400x400.jpg')
 
     def test_tweet_text_is_rendered_in_a_compact_embed_card(self):
@@ -241,7 +241,7 @@ class TestTweetDeliveryHelpers(unittest.TestCase):
         webhook_name, _ = build_webhook_identity('DDuggan21', tweet, parsed)
         embed = build_tweet_embed('DDuggan21', tweet, parsed, 'Original tweet text')
 
-        self.assertEqual(webhook_name, 'Dan Duggan | Personal TweetCord')
+        self.assertEqual(webhook_name, 'Dan Duggan | Free Twitter Bot')
         self.assertEqual(embed.author.name, 'Charlotte Carroll (@charlottecrrll)')
         self.assertEqual(embed.description, 'Original tweet text')
 
@@ -330,7 +330,7 @@ class TestTweetDeliverySend(unittest.IsolatedAsyncioTestCase):
         await delivery.send(
             channel,
             content='<https://x.com/example/status/1>',
-            username='Example | Personal TweetCord',
+            username='Example | Free Twitter Bot',
             avatar_url=None,
             view=None,
         )
@@ -346,7 +346,7 @@ class TestTweetDeliverySend(unittest.IsolatedAsyncioTestCase):
         await delivery.send(
             SimpleNamespace(),
             content='<https://x.com/example/status/1>',
-            username='Example | Personal TweetCord',
+            username='Example | Free Twitter Bot',
             avatar_url=None,
             view=None,
         )
@@ -364,7 +364,7 @@ class TestTweetDeliverySend(unittest.IsolatedAsyncioTestCase):
         await delivery.send(
             SimpleNamespace(),
             content='<https://x.com/example/status/1>',
-            username='Example | Personal TweetCord',
+            username='Example | Free Twitter Bot',
             avatar_url=None,
             embeds=[embed],
             suppress_embeds=False,
