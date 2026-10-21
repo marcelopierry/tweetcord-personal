@@ -5,7 +5,7 @@ A private, self-hosted Discord bot for forwarding posts from selected X/Twitter 
 ## What is customized
 
 - Three-minute delivery delay by default (`notification_delay_seconds: 180`). Every ready post is fetched fresh before delivery, so edited text/media replaces the queued version. A 404 is rechecked once and then canceled; temporary validation failures defer the post instead of sending stale data.
-- `/customize send-delay` changes that post-detection delay persistently and immediately reschedules every queued post.
+- `/customize send-delay` changes the delay only for the server where it is run, persists it across restarts, and immediately reschedules only that server's queued posts. The same tracked account can have independent delivery times in different servers. Existing servers inherit the previous global delay once during migration; newly joined servers use the configured default.
 - Lower polling frequency by default (`tweets_check_period: 60`) to reduce scraping pressure for a personal installation.
 - Per-notifier controls for original posts, retweets, and quote posts remain available through `/add notifier` and `/customize settings`.
 - Tweet text is HTML-decoded and displayed in compact Discord embed cards while links and uploaded media remain separate. Stale upstream media facets are ignored instead of deleting valid text. Quote tweets are ordered as the quote-post link, `🔂` plus the original link, both text cards, the quote post's media, and then the original post's media. A quote only records its own ID, so merely displaying the quoted original never suppresses a later retweet.
