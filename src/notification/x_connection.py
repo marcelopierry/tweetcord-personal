@@ -49,5 +49,14 @@ class XConnection:
     async def follow_user(self, user_id):
         return await self._call('follow_user', user_id)
 
+    async def get_user_info(self, username):
+        return await self._call('get_user_info', username)
+
+    async def unfollow_user(self, user_id):
+        return await self._call('unfollow_user', user_id)
+
+    async def disable_user_notification(self, user_id):
+        return await self._call('disable_user_notification', user_id)
+
     async def enable_user_notification(self, user_id):
         return await self._call('enable_user_notification', user_id)
