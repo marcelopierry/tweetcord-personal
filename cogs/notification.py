@@ -33,6 +33,34 @@ class Notification(Cog_Extension):
     remove_group = app_commands.Group(name='remove', description=t('commands.remove.description'), default_permissions=ADMINISTRATOR)
     customize_group = app_commands.Group(name='customize', description=t('commands.customize.description'), default_permissions=ADMINISTRATOR)
 
+    async def _set_server_enabled(self, itn: discord.Interaction, enabled: bool):
+        if itn.guild_id is None:
+            await itn.response.send_message('Please run this command in a server.', ephemeral=True)
+            return
+        await itn.response.defer(ephemeral=True)
+        changed = await self.account_tracker.set_server_enabled(itn.guild_id, enabled)
+        if enabled:
+            message = ('Tweet delivery enabled in this server with your saved accounts and settings. '
+                       'Posts from the disabled period will not be backfilled.') if changed else 'Tweet delivery is already enabled in this server.'
+        else:
+            message = ('Tweet delivery disabled in this server. Your tracked accounts and settings are preserved.'
+                       if changed else 'Tweet delivery is already disabled in this server.')
+        await itn.followup.send(message, ephemeral=True)
+
+    @app_commands.command(name='disable', description='Suspend tweet delivery in this server without removing accounts or settings.')
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def disable_server(self, itn: discord.Interaction):
+        await self._set_server_enabled(itn, False)
+
+    @app_commands.command(name='enable', description='Resume tweet delivery in this server using its saved accounts and settings.')
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def enable_server(self, itn: discord.Interaction):
+        await self._set_server_enabled(itn, True)
+
     @add_group.command(name='notifier', description=t('commands.add.notifier.description'))
     @app_commands.choices(
         enable_type=[app_commands.Choice(name=t('commands.add.notifier.choices.enable_type.all_default'), value='11'), app_commands.Choice(name=t('commands.add.notifier.choices.enable_type.retweet_only'), value='10'), app_commands.Choice(name=t('commands.add.notifier.choices.enable_type.quote_only'), value='01'), app_commands.Choice(name=t('commands.add.notifier.choices.enable_type.tweet_only'), value='00')],
