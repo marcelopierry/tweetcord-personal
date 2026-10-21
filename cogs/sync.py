@@ -28,7 +28,16 @@ class Sync(Cog_Extension):
             async with db.execute('SELECT id, client_used FROM user WHERE enabled = 1') as cursor:
                 follow_list = {row[0]: row[1] async for row in cursor}
 
-        self.bot.loop.create_task(sync_db(follow_list))
+        notification = self.bot.get_cog('Notification')
+        clients = notification.account_tracker.x_clients if notification else {}
+        missing = set(follow_list.values()) - set(clients)
+        if missing:
+            await itn.followup.send(
+                'X account(s) still reconnecting: ' + ', '.join(sorted(missing)) +
+                '. Please try again shortly.', ephemeral=True,
+            )
+            return
+        self.bot.loop.create_task(sync_db(follow_list, clients))
 
         await itn.followup.send(t('sync.background'), ephemeral=True)
 
