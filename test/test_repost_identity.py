@@ -47,13 +47,13 @@ class IdentityRetryTests(unittest.IsolatedAsyncioTestCase):
         delivery._get_webhook = AsyncMock(return_value=webhook)
         file = Mock()
         with patch('src.notification.delivery.asyncio.sleep', new_callable=AsyncMock) as sleep:
-            await delivery.send(channel, content='tweet', username='Mike | Personal TweetCord', avatar_url='https://example.com/avatar.png', files=[file])
+            await delivery.send(channel, content='tweet', username='Mike | Free Twitter Bot', avatar_url='https://example.com/avatar.png', files=[file])
         self.assertEqual([call.args[0] for call in sleep.await_args_list], [8, 10])
         self.assertEqual(file.reset.call_count, 2)
         self.assertEqual(webhook.send.await_count, 3)
         channel.send.assert_not_awaited()
         for call in webhook.send.await_args_list:
-            self.assertEqual(call.kwargs['username'], 'Mike | Personal TweetCord')
+            self.assertEqual(call.kwargs['username'], 'Mike | Free Twitter Bot')
             self.assertEqual(call.kwargs['avatar_url'], 'https://example.com/avatar.png')
             self.assertTrue(call.kwargs['wait'])
 
@@ -66,3 +66,31 @@ class IdentityRetryTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await delivery.send(channel, content='tweet', username='Mike', avatar_url=None)
         channel.send.assert_not_awaited()
+
+
+class WebhookBrandingTests(unittest.IsolatedAsyncioTestCase):
+    def channel(self, hooks):
+        return NS(id=123, guild=NS(me=NS()),
+                  permissions_for=lambda _: NS(manage_webhooks=True),
+                  webhooks=AsyncMock(return_value=hooks), create_webhook=AsyncMock())
+
+    async def test_legacy_webhook_is_reused_and_cached(self):
+        old = NS(name='Personal TweetCord delivery')
+        channel = self.channel([old])
+        delivery = TweetDelivery(NS())
+        self.assertIs(await delivery._get_webhook(channel), old)
+        self.assertIs(await delivery._get_webhook(channel), old)
+        channel.create_webhook.assert_not_awaited()
+        channel.webhooks.assert_awaited_once()
+
+    async def test_new_webhook_uses_free_twitter_bot_name(self):
+        channel = self.channel([])
+        await TweetDelivery(NS())._get_webhook(channel)
+        self.assertEqual(channel.create_webhook.call_args.kwargs['name'], 'Free Twitter Bot delivery')
+
+    async def test_current_name_preferred_over_legacy(self):
+        old = NS(name='Personal TweetCord delivery')
+        current = NS(name='Free Twitter Bot delivery')
+        channel = self.channel([old, current])
+        self.assertIs(await TweetDelivery(NS())._get_webhook(channel), current)
+        channel.create_webhook.assert_not_awaited()
