@@ -53,9 +53,10 @@ class TestSyncDbUnconfiguredClient(unittest.IsolatedAsyncioTestCase):
         app_mock.connect = AsyncMock()
         app_mock.follow_user = AsyncMock()
         app_mock.enable_user_notification = AsyncMock()
+        app_mock.request.session.aclose = AsyncMock()
 
         with patch('src.sync_db.sync_db.get_accounts', return_value={'known': 'token'}), \
-             patch('src.sync_db.sync_db.Twitter', return_value=app_mock), \
+             patch('src.sync_db.sync_db.authenticate_x', new=AsyncMock(return_value=app_mock)), \
              patch('src.sync_db.sync_db.asyncio.sleep', new=AsyncMock()):
             # Must not raise KeyError on 'gone'
             await sync_db(follow_list)
