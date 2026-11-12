@@ -120,8 +120,14 @@ def build_delivery_text(tweet: Any, parsed_tweet: ParsedTweet | None) -> str:
             parsed_text = parsed_text[0]
         if parsed_text:
             return str(parsed_text).strip()
+        # An empty parsed body is valid when the only facet was an attachment.
+        # Falling back to the notification would reintroduce its media token.
+        if getattr(parsed_tweet, 'text', None) is not None:
+            return ''
 
-    fallback = escape_markdown(html.unescape(str(getattr(tweet, 'text', '') or ''))).strip()
+    # A repost wrapper contains synthetic "RT @handle:" text, not the post body.
+    source = getattr(tweet, 'retweeted_tweet', None) if getattr(tweet, 'is_retweet', False) else tweet
+    fallback = escape_markdown(html.unescape(str(getattr(source, 'text', '') or ''))).strip()
     return safe_truncate(fallback, ParsedTweet.MAX_DESCRIPTION_LENGTH)[0] if fallback else ''
 
 
@@ -278,6 +284,18 @@ def post_timestamp(value=None, source=None, post_id=None, url=None):
     return None
 
 
+def _media_only_description(media: ParsedTweet.Media | None) -> str:
+    items = getattr(media, 'items', None) or []
+    if not items:
+        return ''
+    labels = {'photo': ('Photo', 'photos'), 'video': ('Video', 'videos'),
+              'gif': ('GIF', 'GIFs'), 'animated_gif': ('GIF', 'GIFs')}
+    kinds = {item.get('type') for item in items}
+    kind = kinds.pop() if len(kinds) == 1 else None
+    singular, plural = labels.get(kind, ('Media', 'attachments'))
+    return f'*{singular}*' if len(items) == 1 else f'*{len(items)} {plural}*'
+
+
 def build_tweet_embed(
     tracked_username: str,
     tweet: Any,
@@ -285,6 +303,7 @@ def build_tweet_embed(
     tweet_text: str,
 ) -> discord.Embed | None:
     """Render the tweet body in a compact Discord card without duplicating media."""
+    tweet_text = tweet_text or _media_only_description(getattr(parsed_tweet, 'media', None))
     if not tweet_text:
         return None
 
@@ -336,8 +355,9 @@ def build_quote_original_embed(tweet: Any, parsed_tweet: ParsedTweet | None) -> 
     source = getattr(tweet, 'quoted_tweet', None)
     quote = getattr(parsed_tweet, 'quote', None)
     quote_text = getattr(quote, 'trans_text', None) or getattr(quote, 'text', None)
-    if not quote_text and source:
+    if quote_text is None and source:
         quote_text = escape_markdown(html.unescape(str(getattr(source, 'text', '') or '')))
+    quote_text = (quote_text or '').strip() or _media_only_description(getattr(parsed_tweet, 'quote_media', None))
     if not quote_text:
         return None
     quote_text = safe_truncate(str(quote_text).strip(), ParsedTweet.MAX_DESCRIPTION_LENGTH)[0]

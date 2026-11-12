@@ -216,7 +216,7 @@ class ParsedTweet():
     def _handle_raw_text(raw_text: dict) -> str | None:
         text = raw_text.get('text', None)
         facets = raw_text.get('facets', [])
-        if not text:
+        if text is None:
             return None
         # FxTwitter's raw_text may still contain HTML entities even though its
         # clean text field does not. Twitter facet offsets are based on the
