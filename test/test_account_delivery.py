@@ -87,8 +87,8 @@ class TestAccountDeliveryPipeline(unittest.IsolatedAsyncioTestCase):
         contents = [call.kwargs['content'] for call in tracker.delivery.send.await_args_list]
         self.assertEqual(contents, [
             '<https://x.com/quoter/status/200>\n🔂 <https://x.com/original/status/100>',
-            '▷\nhttps://media.example/quote.jpg',
-            '▷\nhttps://media.example/original.mp4',
+            '▷ *Photo from Quoter*\nhttps://media.example/quote.jpg',
+            '▷ *Video from Original Author*\nhttps://media.example/original.mp4',
             '↧\nhttps://youtu.be/video123',
         ])
         self.assertFalse(any('https://example.com/story' == content for content in contents[1:]))

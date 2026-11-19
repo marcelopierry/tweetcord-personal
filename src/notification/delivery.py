@@ -27,6 +27,7 @@ WEBHOOK_SUFFIX = 'Free Twitter Bot'
 MAX_ATTACHMENTS = 10
 QUOTE_ORIGINAL_EMOJI = '🔂'
 RETWEET_EMOJI = '🔄'
+BLANK_EMBED_DESCRIPTION = '\u200b'
 MARKDOWN_URL_RE = re.compile(
     r'\]\((https?://(?:[^\s()]|\([^\s()]*\))+?)\)',
     flags=re.IGNORECASE,
@@ -284,16 +285,59 @@ def post_timestamp(value=None, source=None, post_id=None, url=None):
     return None
 
 
-def _media_only_description(media: ParsedTweet.Media | None) -> str:
-    items = getattr(media, 'items', None) or []
-    if not items:
-        return ''
-    labels = {'photo': ('Photo', 'photos'), 'video': ('Video', 'videos'),
+def _original_author(
+    tweet: Any, parsed_tweet: ParsedTweet | None, *, quoted: bool,
+) -> tuple[str | None, str | None]:
+    if quoted:
+        quote = getattr(parsed_tweet, 'quote', None)
+        source = getattr(tweet, 'quoted_tweet', None)
+        name = getattr(quote, 'name', None)
+        username = getattr(quote, 'screen_name', None)
+    else:
+        source = getattr(tweet, 'retweeted_tweet', None)
+        name = getattr(parsed_tweet, 'author_name', None)
+        username = getattr(parsed_tweet, 'author_username', None)
+    author = getattr(source, 'author', None)
+    return name or getattr(author, 'name', None), username or getattr(author, 'username', None)
+
+
+def build_media_caption(
+    tracked_username: str,
+    tweet: Any,
+    parsed_tweet: ParsedTweet | None,
+    *,
+    quoted: bool,
+) -> str:
+    """Credit the post that supplied this group of attachments."""
+    is_retweet = getattr(tweet, 'is_retweet', False)
+    if is_retweet:
+        name, username = _original_author(tweet, parsed_tweet, quoted=False)
+    else:
+        webhook_name, _ = build_webhook_identity(tracked_username, tweet, parsed_tweet)
+        name = webhook_name.removesuffix(f' | {WEBHOOK_SUFFIX}')
+        username = tracked_username
+
+    quote_name, quote_username = _original_author(tweet, parsed_tweet, quoted=True)
+    same_author = bool(
+        getattr(tweet, 'is_quoted', False)
+        and username and quote_username and username.casefold() == quote_username.casefold()
+    )
+    if quoted:
+        name, username = quote_name, quote_username
+    credit = name or username or ('the original tweet' if quoted or is_retweet else tracked_username)
+    credit = discord.utils.escape_mentions(discord.utils.escape_markdown(' '.join(credit.split()), ignore_links=False))
+    if same_author:
+        credit += ' (original tweet)' if quoted else ' (new tweet)'
+
+    media = getattr(parsed_tweet, 'quote_media' if quoted else 'media', None)
+    labels = {'photo': ('Photo', 'Photos'), 'video': ('Video', 'Videos'),
               'gif': ('GIF', 'GIFs'), 'animated_gif': ('GIF', 'GIFs')}
-    kinds = {item.get('type') for item in items}
-    kind = kinds.pop() if len(kinds) == 1 else None
-    singular, plural = labels.get(kind, ('Media', 'attachments'))
-    return f'*{singular}*' if len(items) == 1 else f'*{len(items)} {plural}*'
+    items = getattr(media, 'items', None) or []
+    kinds = {labels.get(_get(item, 'type')) for item in items}
+    labels_for_group = kinds.pop() if len(kinds) == 1 else None
+    singular, plural = labels_for_group or ('Media', 'Media')
+    label = plural if len(items) > 1 else singular
+    return f'▷ *{label} from {credit}*'
 
 
 def build_tweet_embed(
@@ -303,24 +347,18 @@ def build_tweet_embed(
     tweet_text: str,
 ) -> discord.Embed | None:
     """Render the tweet body in a compact Discord card without duplicating media."""
-    tweet_text = tweet_text or _media_only_description(getattr(parsed_tweet, 'media', None))
     if not tweet_text:
-        return None
+        if not getattr(getattr(parsed_tweet, 'media', None), 'items', None):
+            return None
+        tweet_text = BLANK_EMBED_DESCRIPTION
 
     is_retweet = bool(getattr(tweet, 'is_retweet', False))
     source = getattr(tweet, 'retweeted_tweet', None) if is_retweet else tweet
     source_author = getattr(source, 'author', None)
 
     if is_retweet:
-        display_name = (
-            getattr(parsed_tweet, 'author_name', None)
-            or getattr(source_author, 'name', None)
-            or 'Original author'
-        )
-        display_username = (
-            getattr(parsed_tweet, 'author_username', None)
-            or getattr(source_author, 'username', None)
-        )
+        display_name, display_username = _original_author(tweet, parsed_tweet, quoted=False)
+        display_name = display_name or 'Original author'
         avatar_url = _large_avatar(
             getattr(parsed_tweet, 'author_avatar_url', None)
             or getattr(source_author, 'profile_image_url_https', None)
@@ -357,14 +395,16 @@ def build_quote_original_embed(tweet: Any, parsed_tweet: ParsedTweet | None) -> 
     quote_text = getattr(quote, 'trans_text', None) or getattr(quote, 'text', None)
     if quote_text is None and source:
         quote_text = escape_markdown(html.unescape(str(getattr(source, 'text', '') or '')))
-    quote_text = (quote_text or '').strip() or _media_only_description(getattr(parsed_tweet, 'quote_media', None))
+    quote_text = (quote_text or '').strip()
     if not quote_text:
-        return None
-    quote_text = safe_truncate(str(quote_text).strip(), ParsedTweet.MAX_DESCRIPTION_LENGTH)[0]
+        if not getattr(getattr(parsed_tweet, 'quote_media', None), 'items', None):
+            return None
+        quote_text = BLANK_EMBED_DESCRIPTION
+    quote_text = safe_truncate(quote_text, ParsedTweet.MAX_DESCRIPTION_LENGTH)[0]
 
     source_author = getattr(source, 'author', None)
-    name = getattr(quote, 'name', None) or getattr(source_author, 'name', None) or 'Original tweet'
-    username = getattr(quote, 'screen_name', None) or getattr(source_author, 'username', None)
+    name, username = _original_author(tweet, parsed_tweet, quoted=True)
+    name = name or 'Original tweet'
     avatar_url = _large_avatar(
         getattr(quote, 'avatar_url', None)
         or getattr(source_author, 'profile_image_url_https', None)

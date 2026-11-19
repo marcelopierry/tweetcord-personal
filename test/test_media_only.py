@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 from core.classes import ParsedTweet
 from src.notification.account_tracker import AccountTracker
 from src.notification.delivery import (
-    MediaDelivery, build_delivery_text, build_tweet_embed,
+    MediaDelivery, build_delivery_text, build_media_caption, build_tweet_embed,
 )
 
 
@@ -33,14 +33,14 @@ def notification(post_id, handle, name, text, **kwargs):
 class MediaOnlyTextTests(unittest.TestCase):
     def test_standalone_photo_or_video_gets_an_attributed_card_without_stale_token(self):
         token = 'https://t.co/media'
-        for kind, label in (('photo', '*Photo*'), ('video', '*Video*')):
+        for kind in ('photo', 'video'):
             with self.subTest(kind=kind):
                 tweet = notification('2120746905705812235', 'chargers', 'Los Angeles Chargers', token)
                 parsed = ParsedTweet({'tweet': media_post(tweet.id, 'chargers', tweet.author.name, kind, token)})
                 body = build_delivery_text(tweet, parsed)
                 self.assertEqual(body, '')
                 card = build_tweet_embed('chargers', tweet, parsed, body)
-                self.assertEqual(card.description, label)
+                self.assertEqual(card.description, '\u200b')
                 self.assertIn('@chargers', card.author.name)
                 self.assertIsNotNone(card.timestamp)
 
@@ -53,6 +53,14 @@ class MediaOnlyTextTests(unittest.TestCase):
         self.assertEqual(build_delivery_text(tweet, None), '')
         tweet.retweeted_tweet = NS(text='Original caption https://example.com/full-link')
         self.assertEqual(build_delivery_text(tweet, None), tweet.retweeted_tweet.text)
+
+    def test_media_caption_escapes_discord_markup_and_mentions_in_names(self):
+        tweet = notification('123', 'example', 'Name_* @everyone', '')
+        parsed = ParsedTweet({'tweet': media_post(tweet.id, 'example', tweet.author.name, 'video', '')})
+        self.assertEqual(
+            build_media_caption('example', tweet, parsed, quoted=False),
+            r'▷ *Video from Name\_\* @' + '\u200b' + 'everyone*',
+        )
 
 
 class MediaOnlyPipelineTests(unittest.IsolatedAsyncioTestCase):
@@ -85,9 +93,10 @@ class MediaOnlyPipelineTests(unittest.IsolatedAsyncioTestCase):
         attachment = object()
         main, media = await self.deliver(tweet, parsed, original=attachment)
         self.assertEqual(main['content'], f'<{tweet.url}>\n🔂 <{original["url"]}>')
-        self.assertEqual([card.description for card in main['embeds']], [tweet.text, '*Photo*'])
+        self.assertEqual([card.description for card in main['embeds']], [tweet.text, '\u200b'])
         self.assertEqual(main['embeds'][1].author.name, 'Los Angeles Chargers (@chargers)')
         self.assertIsNotNone(main['embeds'][1].timestamp)
+        self.assertEqual(media['content'], '▷ *Photo from Los Angeles Chargers*')
         self.assertEqual(media['files'], [attachment])
 
     async def test_josh_downs_gif_repost_has_no_wrapper_text_and_keeps_media(self):
@@ -103,6 +112,21 @@ class MediaOnlyPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(main['embeds']), 1)
         card = main['embeds'][0]
         self.assertEqual(card.author.name, 'JD (@JoshDowns)')
-        self.assertEqual(card.description, '*GIF*')
+        self.assertEqual(card.description, '\u200b')
         self.assertIsNotNone(card.timestamp)
+        self.assertEqual(media['content'], '▷ *GIF from JD*')
         self.assertEqual(media['files'], [attachment])
+
+    async def test_self_quote_labels_each_media_group_with_its_source_post(self):
+        token = 'https://t.co/media'
+        tweet = notification('2120753981127590303', 'example', 'Example', token, is_quoted=True)
+        new_post = media_post(tweet.id, 'example', 'Example', 'video', token)
+        new_post['quote'] = media_post('2120746905705812235', 'Example', 'Example', 'photo', token)
+        parsed = ParsedTweet({'tweet': new_post})
+
+        main, new_media, original_media = await self.deliver(
+            tweet, parsed, primary=object(), original=object(),
+        )
+        self.assertEqual([card.description for card in main['embeds']], ['\u200b', '\u200b'])
+        self.assertEqual(new_media['content'], '▷ *Video from Example (new tweet)*')
+        self.assertEqual(original_media['content'], '▷ *Photo from Example (original tweet)*')

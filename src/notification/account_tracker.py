@@ -14,7 +14,7 @@ from configs.load_configs import configs, IS_TRANSLATION_ENABLED
 from src.i18n import t
 from src.log import setup_logger
 from src.notification.display_tools import get_action
-from src.notification.delivery import ChannelDeliverySequencer, TweetDelivery, build_delivery_links, build_delivery_text, build_quote_original_embed, build_tweet_embed, build_webhook_identity, extract_video_urls, get_delivery_references, prepare_media_delivery
+from src.notification.delivery import ChannelDeliverySequencer, TweetDelivery, build_delivery_links, build_delivery_text, build_media_caption, build_quote_original_embed, build_tweet_embed, build_webhook_identity, extract_video_urls, get_delivery_references, prepare_media_delivery
 from src.notification.delivery_history import DeliveryHistory
 from src.notification.channel_filter import GIANTS_CHANNEL_FILTER
 from src.notification.get_tweets import get_tweets
@@ -343,13 +343,13 @@ class AccountTracker():
 
         # Send main/quote media first, then the quoted original's media. Keeping
         # these as separate messages preserves both grouping and visual order.
-        for label, media in (('tweet', primary_media), ('quoted original', original_media)):
+        for quoted, media in ((False, primary_media), (True, original_media)):
             if not media.files and not media.fallback_urls:
                 continue
-            media_content = '▷'
-            if media.fallback_urls:
-                media_content += '\n' + '\n'.join(media.fallback_urls)
             try:
+                media_content = build_media_caption(username, tweet, parsed_tweet, quoted=quoted)
+                if media.fallback_urls:
+                    media_content += '\n' + '\n'.join(media.fallback_urls)
                 await self.delivery.send(
                     channel,
                     content=media_content,
@@ -359,6 +359,7 @@ class AccountTracker():
                     suppress_embeds=not media.fallback_urls,
                 )
             except Exception as error:
+                label = 'quoted original' if quoted else 'tweet'
                 log.warning(f'failed to send {label} media follow-up for {tweet.url}: {error}')
 
         # Only known video links receive separate native previews. Article and
