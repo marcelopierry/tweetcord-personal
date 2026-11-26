@@ -52,18 +52,18 @@ class Notification(Cog_Extension):
         term='Word or phrase to block, including inside hashtags and other words.',
         account='Only apply to this tracked X handle. Omit to include all accounts.',
         channel='Only apply in this channel. Omit to include all channels.',
-        minutes='How long to block the term, in minutes. Omit for no expiration.',
+        days='How long to block the term, in whole days. Omit for no expiration.',
     )
     async def spoiler_block_add(
         self, itn: discord.Interaction, term: str, account: str | None = None,
         channel: discord.TextChannel | discord.Thread | None = None,
-        minutes: app_commands.Range[int, 1, 5_256_000] | None = None,
+        days: app_commands.Range[int, 1, 3_650] | None = None,
     ):
         await itn.response.defer(ephemeral=True)
         try:
             rule = await self.account_tracker.spoiler_blocks.add(
                 itn.guild_id, term, account=account,
-                channel_id=channel.id if channel else None, minutes=minutes,
+                channel_id=channel.id if channel else None, days=days,
             )
         except ValueError as error:
             await itn.followup.send(str(error), ephemeral=True)

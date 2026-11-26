@@ -61,13 +61,16 @@ class SpoilerBlockTests(unittest.IsolatedAsyncioTestCase):
     async def test_expiry_update_persistence_and_guild_scoped_removal(self):
         clock = NS(time=lambda: 1000)
         with patch('src.notification.spoiler_blocks.time', clock):
-            rule = await self.blocks.add(1, 'Doomsday', minutes=2)
+            rule = await self.blocks.add(1, 'Doomsday', days=2)
+            self.assertEqual(rule.expires_at, 173800)
             other = await self.blocks.add(2, 'Doomsday')
             reopened = SpoilerBlocks(self.path)
             await reopened.load()
             self.assertEqual(reopened.active_rules(1), [rule])
             self.assertFalse(await reopened.remove(2, rule.id))
-            clock.time = lambda: 1120
+            clock.time = lambda: 173799
+            self.assertEqual(reopened.active_rules(1), [rule])
+            clock.time = lambda: 173800
             self.assertEqual(reopened.active_rules(1), [])
             self.assertIsNone(reopened.blocked_rule(1, 21, 'Marvel', NS(text='Doomsday')))
             updated = await reopened.add(1, 'dOOmSday')

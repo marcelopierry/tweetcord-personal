@@ -6,6 +6,7 @@ import re
 import time
 import unicodedata
 from dataclasses import dataclass
+from datetime import timedelta
 
 import aiosqlite
 
@@ -72,7 +73,7 @@ class SpoilerBlocks:
 
     async def add(
         self, server_id: int, term: str, *, account: str | None = None,
-        channel_id: int | None = None, minutes: int | None = None,
+        channel_id: int | None = None, days: int | None = None,
     ) -> SpoilerRule:
         term = ' '.join(term.split())
         term_key = normalize(term)
@@ -81,11 +82,11 @@ class SpoilerBlocks:
         account_key = (account or '').strip().removeprefix('@').casefold()
         if account is not None and not re.fullmatch(r'[a-z0-9_]{1,15}', account_key):
             raise ValueError('Enter an X handle such as @DiscussingFilm.')
-        if minutes is not None and minutes < 1:
-            raise ValueError('Enter at least one minute, or leave duration blank for no expiration.')
+        if days is not None and days < 1:
+            raise ValueError('Enter at least one day, or leave days blank for no expiration.')
         channel = str(channel_id) if channel_id is not None else ''
         async with self._lock:
-            expires_at = time.time() + minutes * 60 if minutes is not None else None
+            expires_at = time.time() + timedelta(days=days).total_seconds() if days is not None else None
             async with aiosqlite.connect(self.db_path, timeout=10) as db:
                 async with db.execute(
                     'INSERT INTO spoiler_block (server_id, term, term_key, account, channel_id, expires_at) '
