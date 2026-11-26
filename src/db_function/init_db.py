@@ -24,6 +24,16 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS server_user_config (server_id TEXT, user_id TEXT, translate TEXT, PRIMARY KEY(server_id, user_id), FOREIGN KEY (user_id) REFERENCES user (id));
             CREATE TABLE IF NOT EXISTS runtime_setting (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS delivered_tweet (channel_id TEXT, tweet_id TEXT, delivered_at TEXT NOT NULL, PRIMARY KEY(channel_id, tweet_id));
+            CREATE TABLE IF NOT EXISTS spoiler_block (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                server_id TEXT NOT NULL,
+                term TEXT NOT NULL,
+                term_key TEXT NOT NULL,
+                account TEXT NOT NULL DEFAULT '',
+                channel_id TEXT NOT NULL DEFAULT '',
+                expires_at REAL,
+                UNIQUE (server_id, term_key, account, channel_id)
+            );
         """)
         await db.commit()
 

@@ -8,11 +8,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from src.notification.account_tracker import AccountTracker
 from src.notification.delivery import MediaDelivery
+from src.notification.spoiler_blocks import SpoilerBlocks
 
 
 class TestAccountDeliveryPipeline(unittest.IsolatedAsyncioTestCase):
     async def test_quote_delivery_orders_both_media_groups_and_only_previews_video_links(self):
         tracker = AccountTracker.__new__(AccountTracker)
+        tracker.spoiler_blocks = SpoilerBlocks(':memory:')
         tracker.session = SimpleNamespace()
         tracker.delivery = SimpleNamespace(send=AsyncMock())
         tracker.delivery_history = SimpleNamespace(
@@ -68,7 +70,7 @@ class TestAccountDeliveryPipeline(unittest.IsolatedAsyncioTestCase):
         channel = SimpleNamespace(
             id=321,
             mention='<#321>',
-            guild=SimpleNamespace(filesize_limit=25_000_000, get_role=lambda role_id: None),
+            guild=SimpleNamespace(id=111, filesize_limit=25_000_000, get_role=lambda role_id: None),
         )
         data = {'role_id': None, 'customized_msg': None}
         media_deliveries = [

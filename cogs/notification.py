@@ -24,6 +24,15 @@ log = setup_logger(__name__)
 lock = get_lock()
 
 
+def format_spoiler_rule(rule):
+    term = discord.utils.escape_markdown(rule.term, ignore_links=False)
+    scope = f'<#{rule.channel_id}>' if rule.channel_id else 'All channels'
+    if rule.account:
+        scope += f' · @{rule.account}'
+    expiry = f'Expires <t:{int(rule.expires_at)}:R>' if rule.expires_at else 'No expiration'
+    return f'**#{rule.id}** · {term} · {scope} · {expiry}'
+
+
 class Notification(Cog_Extension):
     def __init__(self, bot):
         super().__init__(bot)
@@ -32,6 +41,77 @@ class Notification(Cog_Extension):
     add_group = app_commands.Group(name='add', description=t('commands.add.description'), default_permissions=ADMINISTRATOR)
     remove_group = app_commands.Group(name='remove', description=t('commands.remove.description'), default_permissions=ADMINISTRATOR)
     customize_group = app_commands.Group(name='customize', description=t('commands.customize.description'), default_permissions=ADMINISTRATOR)
+    spoiler_block = app_commands.Group(
+        name='spoiler-block', description='Manage this server’s tweet spoiler filters.',
+        guild_only=True, default_permissions=discord.Permissions(manage_guild=True),
+    )
+
+    @spoiler_block.command(name='add', description='Block tweets containing a word or phrase.')
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(
+        term='Word or phrase to block, including inside hashtags and other words.',
+        account='Only apply to this tracked X handle. Omit to include all accounts.',
+        channel='Only apply in this channel. Omit to include all channels.',
+        minutes='How long to block the term, in minutes. Omit for no expiration.',
+    )
+    async def spoiler_block_add(
+        self, itn: discord.Interaction, term: str, account: str | None = None,
+        channel: discord.TextChannel | discord.Thread | None = None,
+        minutes: app_commands.Range[int, 1, 5_256_000] | None = None,
+    ):
+        await itn.response.defer(ephemeral=True)
+        try:
+            rule = await self.account_tracker.spoiler_blocks.add(
+                itn.guild_id, term, account=account,
+                channel_id=channel.id if channel else None, minutes=minutes,
+            )
+        except ValueError as error:
+            await itn.followup.send(str(error), ephemeral=True)
+            return
+        except aiosqlite.Error:
+            log.exception('Unable to save spoiler block for server %s', itn.guild_id)
+            await itn.followup.send('Could not save the spoiler block. Please try again.', ephemeral=True)
+            return
+        await itn.followup.send(
+            'Spoiler block saved.\n' + format_spoiler_rule(rule), ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(), suppress_embeds=True,
+        )
+
+    @spoiler_block.command(name='list', description='Show active spoiler blocks and their rule IDs.')
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def spoiler_block_list(
+        self, itn: discord.Interaction, page: app_commands.Range[int, 1] = 1,
+    ):
+        rules = sorted(self.account_tracker.spoiler_blocks.active_rules(itn.guild_id), key=lambda rule: rule.id)
+        page_size = 5
+        pages = (len(rules) + page_size - 1) // page_size
+        if not rules:
+            message = 'This server has no active spoiler blocks.'
+        elif page > pages:
+            message = f'Choose a page between 1 and {pages}.'
+        else:
+            start = (page - 1) * page_size
+            lines = [format_spoiler_rule(rule) for rule in rules[start:start + page_size]]
+            message = '\n'.join([f'**Spoiler blocks · Page {page} of {pages}**', *lines])
+        await itn.response.send_message(
+            message, ephemeral=True, allowed_mentions=discord.AllowedMentions.none(), suppress_embeds=True,
+        )
+
+    @spoiler_block.command(name='remove', description='Remove a spoiler block by its rule ID.')
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(rule_id='Find the ID with /spoiler-block list.')
+    async def spoiler_block_remove(
+        self, itn: discord.Interaction, rule_id: app_commands.Range[int, 1],
+    ):
+        await itn.response.defer(ephemeral=True)
+        try:
+            removed = await self.account_tracker.spoiler_blocks.remove(itn.guild_id, rule_id)
+        except aiosqlite.Error:
+            log.exception('Unable to remove spoiler block for server %s', itn.guild_id)
+            await itn.followup.send('Could not remove the spoiler block. Please try again.', ephemeral=True)
+            return
+        message = f'Removed spoiler block **#{rule_id}**.' if removed else 'No spoiler block with that ID in this server.'
+        await itn.followup.send(message, ephemeral=True)
 
     async def _set_server_enabled(self, itn: discord.Interaction, enabled: bool):
         if itn.guild_id is None:
@@ -474,4 +554,6 @@ class Notification(Cog_Extension):
 
 
 async def setup(bot: commands.Bot):
-    await bot.add_cog(Notification(bot))
+    cog = Notification(bot)
+    await cog.account_tracker.spoiler_blocks.load()
+    await bot.add_cog(cog)

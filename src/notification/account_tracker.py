@@ -23,6 +23,7 @@ from src.notification.x_auth import authenticate_x, recover_x_account
 from src.notification.delay_queue import DelayedTweetBuffer
 from src.notification.server_delay import ServerDelays
 from src.notification.server_delivery import ServerDelivery
+from src.notification.spoiler_blocks import SpoilerBlocks
 from src.notification.x_validation import TweetSuperseded, validate_on_x
 from src.notification.subscriptions import ensure_subscription
 from src.notification.x_connection import XConnection
@@ -59,6 +60,7 @@ class AccountTracker():
         self.delivery = TweetDelivery(bot)
         self.delivery_sequencer = ChannelDeliverySequencer()
         self.delivery_history = DeliveryHistory(self.db_path)
+        self.spoiler_blocks = SpoilerBlocks(self.db_path)
         # Responsible for processing queries and writing timestamps
         self.db_write_queue = asyncio.Queue()
         self.latest_tweet_timestamps = {}
@@ -253,11 +255,20 @@ class AccountTracker():
         parsed_tweet: ParsedTweet | None,
         view: discord.ui.View | None,
         lang: str | None,
+        *,
+        fresh_parsed_tweet: ParsedTweet | None = None,
     ) -> None:
         """Send every component of one tweet while holding its channel lock."""
         blocked_term = GIANTS_CHANNEL_FILTER.blocked_reason(channel.id, username, tweet, parsed_tweet)
         if blocked_term:
             log.info(f'filtered tweet {tweet.id} in channel {channel.id}: matched {blocked_term!r}')
+            return
+        spoiler_rule = self.spoiler_blocks.blocked_rule(
+            channel.guild.id, channel.id, username, tweet,
+            parsed_tweet if parsed_tweet is not None else fresh_parsed_tweet,
+        )
+        if spoiler_rule:
+            log.info(f'filtered tweet {tweet.id} in channel {channel.id} by spoiler block #{spoiler_rule.id}')
             return
         references = get_delivery_references(tweet, parsed_tweet)
         claim_id = references.claim_id
@@ -442,6 +453,10 @@ class AccountTracker():
                 channel_id, getattr(candidate.author, 'username', ''), candidate,
             ):
                 continue
+            if server_id is not None and self.spoiler_blocks.blocked_rule(
+                server_id, channel_id, candidate.author.username, candidate, parsed_tweet,
+            ):
+                continue
             async with connect_readonly(self.db_path) as db:
                 rows = await (await db.execute(
                     'SELECT n.enable_type, n.enable_media_type FROM notification n '
@@ -563,6 +578,7 @@ class AccountTracker():
                                     current_p_tweet,
                                     current_view,
                                     lang,
+                                    fresh_parsed_tweet=fresh_parsed_tweet,
                                 )
 
     async def tweetsUpdater(self, app: Twitter):

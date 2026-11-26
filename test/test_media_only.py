@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from core.classes import ParsedTweet
 from src.notification.account_tracker import AccountTracker
+from src.notification.spoiler_blocks import SpoilerBlocks
 from src.notification.delivery import (
     MediaDelivery, build_delivery_text, build_media_caption, build_tweet_embed,
 )
@@ -66,11 +67,12 @@ class MediaOnlyTextTests(unittest.TestCase):
 class MediaOnlyPipelineTests(unittest.IsolatedAsyncioTestCase):
     async def deliver(self, tweet, parsed, primary=None, original=None):
         tracker = AccountTracker.__new__(AccountTracker)
+        tracker.spoiler_blocks = SpoilerBlocks(':memory:')
         tracker.session = NS()
         tracker.delivery = NS(send=AsyncMock())
         tracker.delivery_history = NS(claim=AsyncMock(return_value=True),
                                       release=AsyncMock(), record=AsyncMock())
-        channel = NS(id=321, mention='<#321>', guild=NS(filesize_limit=25_000_000))
+        channel = NS(id=321, mention='<#321>', guild=NS(id=111, filesize_limit=25_000_000))
         with patch('src.notification.account_tracker.EMBED_TYPE', 'built_in'), patch(
             'src.notification.account_tracker.prepare_media_delivery', new=AsyncMock(side_effect=[
                 MediaDelivery(files=[primary] if primary else [], fallback_urls=[]),
